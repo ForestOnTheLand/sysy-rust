@@ -1,3 +1,5 @@
+//! In this file, different kinds of AST are defined.
+
 /// `CompUnit ::= FuncDef`
 #[derive(Debug)]
 pub struct CompUnit {

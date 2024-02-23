@@ -5,8 +5,10 @@ grammar;
 match {
     // Skip Whitespace
     r"\s*" => {},
-    // Skip Comment
+    // Skip Comment - Single-line
     r"//[^\n\r]*[\n\r]*" => {},
+    // Skip Comment - Multi-line
+    r"/\*([^*]|\*[^/]+/)*\*/" => {},
     // Default
     _
 }
