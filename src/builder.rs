@@ -1,4 +1,4 @@
-//! In this file, the transformation from AST to KoopaIR is provided.
+//! In this file, the conversion from AST to KoopaIR is provided.
 
 use crate::ast::{Block, CompUnit, FuncDef, FuncType};
 use crate::util::Error;

@@ -5,6 +5,7 @@ pub enum Error {
     MissingArgument,
     InvalidArgument,
     InvalidFile(io::Error),
+    InvalidFunctionName,
 }
 
 pub enum Mode {
