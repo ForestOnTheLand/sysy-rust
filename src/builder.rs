@@ -10,7 +10,7 @@ use std::io;
 
 #[derive(Debug)]
 pub enum Error {
-    NotImplementedError,
+    MissingMainFunctionError,
 }
 
 pub fn output_program(program: &Program, output: impl io::Write) {
@@ -19,6 +19,9 @@ pub fn output_program(program: &Program, output: impl io::Write) {
 
 pub fn build_program(comp_unit: CompUnit) -> Result<Program, Error> {
     let mut program = Program::new();
+    if comp_unit.func_def.ident != "main" {
+        return Err(Error::MissingMainFunctionError);
+    }
     build_function(&mut program, comp_unit.func_def)?;
     Ok(program)
 }
@@ -29,9 +32,6 @@ fn build_function(program: &mut Program, func_def: FuncDef) -> Result<(), Error>
         Vec::new(),
         match func_def.func_type {
             FuncType::Int => Type::get_i32(),
-            _ => {
-                return Err(Error::NotImplementedError);
-            }
         },
     );
     let func = program.new_func(func);
