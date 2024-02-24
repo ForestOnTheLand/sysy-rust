@@ -27,5 +27,8 @@ fn main() {
     println!("{:#?}", ast);
 
     let program = builder::build_program(ast).unwrap();
-    builder::output_program(&program, File::create(output).unwrap());
+    builder::output_program(
+        &program,
+        File::create(output).expect("cannot create output file"),
+    );
 }
