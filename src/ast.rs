@@ -26,8 +26,36 @@ pub struct Block {
     pub stmt: Stmt,
 }
 
-/// `Stmt ::= "return" Number ";"`
+/// `Stmt ::= "return" Exp ";"`
 #[derive(Debug)]
 pub struct Stmt {
-    pub num: i32,
+    pub exp: Box<Exp>,
+}
+
+/// Exp ::= UnaryExp;
+#[derive(Debug)]
+pub struct Exp {
+    pub unary_exp: Box<UnaryExp>,
+}
+
+/// PrimaryExp ::= "(" Exp ")" | Number;
+#[derive(Debug)]
+pub enum PrimaryExp {
+    Expression(Box<Exp>),
+    Number(i32),
+}
+
+/// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;
+#[derive(Debug)]
+pub enum UnaryExp {
+    Primary(Box<PrimaryExp>),
+    Unary(UnaryOp, Box<UnaryExp>),
+}
+
+/// UnaryOp ::= "+" | "-" | "!";
+#[derive(Debug)]
+pub enum UnaryOp {
+    Positive,
+    Negative,
+    Not,
 }

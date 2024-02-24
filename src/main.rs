@@ -23,6 +23,7 @@ fn main() {
 
     match mode {
         util::Mode::Koopa => {
+            println!("{:#?}", ast);
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {
