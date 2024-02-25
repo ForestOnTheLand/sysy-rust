@@ -35,7 +35,7 @@ pub struct Stmt {
 /// Exp ::= UnaryExp;
 #[derive(Debug)]
 pub struct Exp {
-    pub add_exp: Box<AddExp>,
+    pub lor_exp: Box<LOrExp>,
 }
 
 /// PrimaryExp ::= "(" Exp ")" | Number;
@@ -85,4 +85,46 @@ pub enum AddExp {
 pub enum AddOp {
     Add,
     Sub,
+}
+
+/// RelExp ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
+#[derive(Debug)]
+pub enum RelExp {
+    Single(Box<AddExp>),
+    Binary(Box<RelExp>, RelOp, Box<AddExp>),
+}
+
+#[derive(Debug)]
+pub enum RelOp {
+    Lt,
+    Gt,
+    Le,
+    Ge,
+}
+
+/// EqExp ::= RelExp | EqExp ("==" | "!=") RelExp;
+#[derive(Debug)]
+pub enum EqExp {
+    Single(Box<RelExp>),
+    Binary(Box<EqExp>, EqOp, Box<RelExp>),
+}
+
+#[derive(Debug)]
+pub enum EqOp {
+    Eq,
+    Neq,
+}
+
+/// LAndExp ::= EqExp | LAndExp "&&" EqExp;
+#[derive(Debug)]
+pub enum LAndExp {
+    Single(Box<EqExp>),
+    Binary(Box<LAndExp>, Box<EqExp>),
+}
+
+/// LOrExp ::= LAndExp | LOrExp "||" LAndExp;
+#[derive(Debug)]
+pub enum LOrExp {
+    Single(Box<LAndExp>),
+    Binary(Box<LOrExp>, Box<LAndExp>),
 }

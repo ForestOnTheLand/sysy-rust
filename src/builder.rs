@@ -1,9 +1,6 @@
 //! In this file, the conversion from AST to KoopaIR is provided.
 
-use crate::ast::{
-    AddExp, AddOp, Block, CompUnit, Exp, FuncDef, FuncType, MulExp, MulOp, PrimaryExp, UnaryExp,
-    UnaryOp,
-};
+use crate::ast::*;
 use crate::util::Error;
 use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
@@ -63,7 +60,7 @@ fn build_block(func: &mut FunctionData, block: &Block) -> Result<(), Error> {
 }
 
 fn build_exp(func: &mut FunctionData, bb: BasicBlock, exp: &Exp) -> Result<Value, Error> {
-    build_add_exp(func, bb, exp.add_exp.as_ref())
+    build_lor_exp(func, bb, exp.lor_exp.as_ref())
 }
 
 fn build_unary_exp(
@@ -143,6 +140,90 @@ fn build_add_exp(func: &mut FunctionData, bb: BasicBlock, exp: &AddExp) -> Resul
                 left,
                 right,
             );
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
+    }
+}
+
+fn build_rel_exp(func: &mut FunctionData, bb: BasicBlock, exp: &RelExp) -> Result<Value, Error> {
+    match exp {
+        RelExp::Single(exp) => build_add_exp(func, bb, exp),
+        RelExp::Binary(left, op, right) => {
+            let left = build_rel_exp(func, bb, left)?;
+            let right = build_add_exp(func, bb, right)?;
+            let value = func.dfg_mut().new_value().binary(
+                match op {
+                    RelOp::Lt => BinaryOp::Lt,
+                    RelOp::Le => BinaryOp::Le,
+                    RelOp::Gt => BinaryOp::Gt,
+                    RelOp::Ge => BinaryOp::Ge,
+                },
+                left,
+                right,
+            );
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
+    }
+}
+
+fn build_eq_exp(func: &mut FunctionData, bb: BasicBlock, exp: &EqExp) -> Result<Value, Error> {
+    match exp {
+        EqExp::Single(exp) => build_rel_exp(func, bb, exp),
+        EqExp::Binary(left, op, right) => {
+            let left = build_eq_exp(func, bb, left)?;
+            let right = build_rel_exp(func, bb, right)?;
+            let value = func.dfg_mut().new_value().binary(
+                match op {
+                    EqOp::Eq => BinaryOp::Eq,
+                    EqOp::Neq => BinaryOp::NotEq,
+                },
+                left,
+                right,
+            );
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
+    }
+}
+
+/// `a && b ` is equivalent to `(a != 0) & (b != 0)`
+fn build_land_exp(func: &mut FunctionData, bb: BasicBlock, exp: &LAndExp) -> Result<Value, Error> {
+    match exp {
+        LAndExp::Single(exp) => build_eq_exp(func, bb, exp),
+        LAndExp::Binary(left, right) => {
+            let zero = func.dfg_mut().new_value().integer(0);
+            let left = build_land_exp(func, bb, left)?;
+            let l = func
+                .dfg_mut()
+                .new_value()
+                .binary(BinaryOp::NotEq, left, zero);
+            new_inst!(func, bb, l);
+            let right = build_eq_exp(func, bb, right)?;
+            let r = func
+                .dfg_mut()
+                .new_value()
+                .binary(BinaryOp::NotEq, right, zero);
+            new_inst!(func, bb, r);
+            let value = func.dfg_mut().new_value().binary(BinaryOp::And, l, r);
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
+    }
+}
+
+/// `a || b ` is equivalent to `(a | b) != 0`
+fn build_lor_exp(func: &mut FunctionData, bb: BasicBlock, exp: &LOrExp) -> Result<Value, Error> {
+    match exp {
+        LOrExp::Single(exp) => build_land_exp(func, bb, exp),
+        LOrExp::Binary(left, right) => {
+            let zero = func.dfg_mut().new_value().integer(0);
+            let left = build_lor_exp(func, bb, left)?;
+            let right = build_land_exp(func, bb, right)?;
+            let or = func.dfg_mut().new_value().binary(BinaryOp::Or, left, right);
+            new_inst!(func, bb, or);
+            let value = func.dfg_mut().new_value().binary(BinaryOp::NotEq, or, zero);
             new_inst!(func, bb, value);
             Ok(value)
         }

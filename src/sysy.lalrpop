@@ -25,16 +25,16 @@ FuncType: FuncType = "int" => FuncType::Int;
 
 Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
 
-// Stmt        ::= "return" Exp ";";
+// Stmt ::= "return" Exp ";";
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
-// Exp         ::= UnaryExp;
-Exp: Box<Exp> = <add_exp: AddExp> => Box::new(Exp { <> });
-// PrimaryExp  ::= "(" Exp ")" | Number;
+// Exp ::= LOrExp;
+Exp: Box<Exp> = <lor_exp: LOrExp> => Box::new(Exp { <> });
+// PrimaryExp ::= "(" Exp ")" | Number;
 PrimaryExp: Box<PrimaryExp> = {
     "(" <Exp> ")" => Box::new(PrimaryExp::Expression( <> )),
     Number => Box::new(PrimaryExp::Number( <> )),
 }
-// UnaryExp    ::= PrimaryExp | UnaryOp UnaryExp;
+// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;
 UnaryExp: Box<UnaryExp> = {
     PrimaryExp => Box::new(UnaryExp::Single( <> )),
     UnaryOp UnaryExp => Box::new(UnaryExp::Unary( <> )),
@@ -63,6 +63,36 @@ AddExp: Box<AddExp> = {
 AddOp: AddOp = {
     "+" => AddOp::Add,
     "-" => AddOp::Sub,
+}
+// RelExp      ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
+RelExp: Box<RelExp> = {
+    AddExp => Box::new(RelExp::Single( <> )),
+    RelExp RelOp AddExp => Box::new(RelExp::Binary( <> )),
+}
+RelOp: RelOp = {
+    "<" => RelOp::Lt,
+    ">" => RelOp::Gt,
+    "<=" => RelOp::Le,
+    ">=" => RelOp::Ge,
+}
+// EqExp       ::= RelExp | EqExp ("==" | "!=") RelExp;
+EqExp: Box<EqExp> = {
+    RelExp => Box::new(EqExp::Single( <> )),
+    EqExp EqOp RelExp => Box::new(EqExp::Binary( <> )),
+}
+EqOp: EqOp = {
+    "==" => EqOp::Eq,
+    "!=" => EqOp::Neq,
+}
+// LAndExp     ::= EqExp | LAndExp "&&" EqExp;
+LAndExp: Box<LAndExp> = {
+    EqExp => Box::new(LAndExp::Single( <> )),
+    <LAndExp> "&&" <EqExp> => Box::new(LAndExp::Binary( <> )),
+}
+// LOrExp      ::= LAndExp | LOrExp "||" LAndExp;
+LOrExp: Box<LOrExp> = {
+    LAndExp => Box::new(LOrExp::Single( <> )),
+    <LOrExp> "||" <LAndExp> => Box::new(LOrExp::Binary( <> )),
 }
 
 Number: i32 = <num: IntConst> => <>;
