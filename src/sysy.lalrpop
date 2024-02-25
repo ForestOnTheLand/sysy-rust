@@ -28,22 +28,41 @@ Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
 // Stmt        ::= "return" Exp ";";
 Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
 // Exp         ::= UnaryExp;
-Exp: Box<Exp> = <unary_exp: UnaryExp> => Box::new(Exp { <> });
+Exp: Box<Exp> = <add_exp: AddExp> => Box::new(Exp { <> });
 // PrimaryExp  ::= "(" Exp ")" | Number;
 PrimaryExp: Box<PrimaryExp> = {
-    "(" <exp: Exp> ")" => Box::new(PrimaryExp::Expression( <> )),
-    <number: Number> => Box::new(PrimaryExp::Number( <> )),
+    "(" <Exp> ")" => Box::new(PrimaryExp::Expression( <> )),
+    Number => Box::new(PrimaryExp::Number( <> )),
 }
 // UnaryExp    ::= PrimaryExp | UnaryOp UnaryExp;
 UnaryExp: Box<UnaryExp> = {
-    <primary_exp: PrimaryExp> => Box::new(UnaryExp::Primary( <> )),
-    <unary_op: UnaryOp> <unary_exp: UnaryExp> => Box::new(UnaryExp::Unary( <> )),
+    PrimaryExp => Box::new(UnaryExp::Single( <> )),
+    UnaryOp UnaryExp => Box::new(UnaryExp::Unary( <> )),
 }
-// UnaryOp     ::= "+" | "-" | "!";
+// UnaryOp ::= "+" | "-" | "!";
 UnaryOp: UnaryOp = {
-    "+" => UnaryOp::Positive,
-    "-" => UnaryOp::Negative,
+    "+" => UnaryOp::Pos,
+    "-" => UnaryOp::Neg,
     "!" => UnaryOp::Not,
+}
+// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
+MulExp: Box<MulExp> = {
+    UnaryExp => Box::new(MulExp::Single( <> )),
+    MulExp MulOp UnaryExp => Box::new(MulExp::Binary( <> )),
+}
+MulOp: MulOp = {
+    "*" => MulOp::Mul,
+    "/" => MulOp::Div,
+    "%" => MulOp::Mod,
+}
+// AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
+AddExp: Box<AddExp> = {
+    MulExp => Box::new(AddExp::Single( <> )),
+    AddExp AddOp MulExp => Box::new(AddExp::Binary( <> )),
+}
+AddOp: AddOp = {
+    "+" => AddOp::Add,
+    "-" => AddOp::Sub,
 }
 
 Number: i32 = <num: IntConst> => <>;

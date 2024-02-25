@@ -35,7 +35,7 @@ pub struct Stmt {
 /// Exp ::= UnaryExp;
 #[derive(Debug)]
 pub struct Exp {
-    pub unary_exp: Box<UnaryExp>,
+    pub add_exp: Box<AddExp>,
 }
 
 /// PrimaryExp ::= "(" Exp ")" | Number;
@@ -48,14 +48,41 @@ pub enum PrimaryExp {
 /// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;
 #[derive(Debug)]
 pub enum UnaryExp {
-    Primary(Box<PrimaryExp>),
+    Single(Box<PrimaryExp>),
     Unary(UnaryOp, Box<UnaryExp>),
 }
 
 /// UnaryOp ::= "+" | "-" | "!";
 #[derive(Debug)]
 pub enum UnaryOp {
-    Positive,
-    Negative,
+    Pos,
+    Neg,
     Not,
+}
+
+/// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
+#[derive(Debug)]
+pub enum MulExp {
+    Single(Box<UnaryExp>),
+    Binary(Box<MulExp>, MulOp, Box<UnaryExp>),
+}
+
+#[derive(Debug)]
+pub enum MulOp {
+    Mul,
+    Div,
+    Mod,
+}
+
+/// AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
+#[derive(Debug)]
+pub enum AddExp {
+    Single(Box<MulExp>),
+    Binary(Box<AddExp>, AddOp, Box<MulExp>),
+}
+
+#[derive(Debug)]
+pub enum AddOp {
+    Add,
+    Sub,
 }

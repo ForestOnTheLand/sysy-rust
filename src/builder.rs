@@ -1,6 +1,9 @@
 //! In this file, the conversion from AST to KoopaIR is provided.
 
-use crate::ast::{Block, CompUnit, Exp, FuncDef, FuncType, PrimaryExp, UnaryExp, UnaryOp};
+use crate::ast::{
+    AddExp, AddOp, Block, CompUnit, Exp, FuncDef, FuncType, MulExp, MulOp, PrimaryExp, UnaryExp,
+    UnaryOp,
+};
 use crate::util::Error;
 use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
@@ -60,7 +63,7 @@ fn build_block(func: &mut FunctionData, block: &Block) -> Result<(), Error> {
 }
 
 fn build_exp(func: &mut FunctionData, bb: BasicBlock, exp: &Exp) -> Result<Value, Error> {
-    build_unary_exp(func, bb, exp.unary_exp.as_ref())
+    build_add_exp(func, bb, exp.add_exp.as_ref())
 }
 
 fn build_unary_exp(
@@ -69,12 +72,12 @@ fn build_unary_exp(
     exp: &UnaryExp,
 ) -> Result<Value, Error> {
     match exp {
-        UnaryExp::Primary(exp) => build_primary_exp(func, bb, exp),
+        UnaryExp::Single(exp) => build_primary_exp(func, bb, exp),
         UnaryExp::Unary(unary_op, exp) => {
             let value = build_unary_exp(func, bb, exp)?;
             match unary_op {
-                UnaryOp::Positive => Ok(value),
-                UnaryOp::Negative => {
+                UnaryOp::Pos => Ok(value),
+                UnaryOp::Neg => {
                     let zero = func.dfg_mut().new_value().integer(0);
                     let neg = func
                         .dfg_mut()
@@ -102,5 +105,46 @@ fn build_primary_exp(
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref()),
         PrimaryExp::Number(num) => Ok(func.dfg_mut().new_value().integer(*num)),
+    }
+}
+
+fn build_mul_exp(func: &mut FunctionData, bb: BasicBlock, exp: &MulExp) -> Result<Value, Error> {
+    match exp {
+        MulExp::Single(exp) => build_unary_exp(func, bb, exp),
+        MulExp::Binary(left, op, right) => {
+            let left = build_mul_exp(func, bb, left)?;
+            let right = build_unary_exp(func, bb, right)?;
+            let value = func.dfg_mut().new_value().binary(
+                match op {
+                    MulOp::Mul => BinaryOp::Mul,
+                    MulOp::Div => BinaryOp::Div,
+                    MulOp::Mod => BinaryOp::Mod,
+                },
+                left,
+                right,
+            );
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
+    }
+}
+
+fn build_add_exp(func: &mut FunctionData, bb: BasicBlock, exp: &AddExp) -> Result<Value, Error> {
+    match exp {
+        AddExp::Single(exp) => build_mul_exp(func, bb, exp),
+        AddExp::Binary(left, op, right) => {
+            let left = build_add_exp(func, bb, left)?;
+            let right = build_mul_exp(func, bb, right)?;
+            let value = func.dfg_mut().new_value().binary(
+                match op {
+                    AddOp::Add => BinaryOp::Add,
+                    AddOp::Sub => BinaryOp::Sub,
+                },
+                left,
+                right,
+            );
+            new_inst!(func, bb, value);
+            Ok(value)
+        }
     }
 }
