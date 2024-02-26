@@ -9,7 +9,7 @@ use std::{collections::HashMap, io};
 
 pub fn translate_program(program: &Program, output: &mut impl io::Write) -> Result<(), Error> {
     // Functions
-    writeln!(output, "  .text").map_err(Error::InvalidFile)?;
+    writeln!(output, "  .text").map_err(Error::OutputError)?;
     for &func in program.func_layout() {
         let func_data = program.func(func);
         translate_function(func_data, output)?;
@@ -23,7 +23,7 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
         .strip_prefix("@")
         .ok_or(Error::InvalidFunctionName)?;
     let dfg = func_data.dfg();
-    writeln!(output, "  .global {}\n{}:", func_name, func_name).map_err(Error::InvalidFile)?;
+    writeln!(output, "  .global {}\n{}:", func_name, func_name).map_err(Error::OutputError)?;
 
     let mut table = RegisterTable::new();
     let mut symbol: HashMap<Value, Register> = HashMap::new();
@@ -57,7 +57,7 @@ fn translate_value(
                 Register::new(0)?
             } else {
                 let reg = table.get_vaccant()?;
-                writeln!(output, "  li {}, {}", reg, int.value()).map_err(Error::InvalidFile)?;
+                writeln!(output, "  li {}, {}", reg, int.value()).map_err(Error::OutputError)?;
                 reg
             }
         }
@@ -73,12 +73,12 @@ fn translate_value(
                         }
                     };
                     if reg.id != 0 {
-                        writeln!(output, "  mv a0, {}", reg).map_err(Error::InvalidFile)?;
+                        writeln!(output, "  mv a0, {}", reg).map_err(Error::OutputError)?;
                     }
                 }
                 None => {}
             }
-            writeln!(output, "  ret").map_err(Error::InvalidFile)?;
+            writeln!(output, "  ret").map_err(Error::OutputError)?;
             Register::new(10)?
         }
 
@@ -93,62 +93,62 @@ fn translate_value(
                 // + -
                 BinaryOp::Add => {
                     writeln!(output, "  add {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Sub => {
                     writeln!(output, "  sub {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 // * / %
                 BinaryOp::Mul => {
                     writeln!(output, "  mul {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Div => {
                     writeln!(output, "  div {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Mod => {
                     writeln!(output, "  rem {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 // &
                 BinaryOp::And => {
                     writeln!(output, "  and {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 // |
                 BinaryOp::Or => {
                     writeln!(output, "  or {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 // < <= > >=
                 BinaryOp::Lt => {
                     writeln!(output, "  slt {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Le => {
                     writeln!(output, "  sgt {}, {}, {}", res, right, left)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Gt => {
                     writeln!(output, "  sgt {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 BinaryOp::Ge => {
                     writeln!(output, "  slt {}, {}, {}", res, right, left)
-                        .map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
                 }
                 // == !=
                 BinaryOp::Eq => {
                     writeln!(output, "  xor {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
-                    writeln!(output, "  seqz {}, {}", res, left).map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
+                    writeln!(output, "  seqz {}, {}", res, left).map_err(Error::OutputError)?;
                 }
                 BinaryOp::NotEq => {
                     writeln!(output, "  xor {}, {}, {}", res, left, right)
-                        .map_err(Error::InvalidFile)?;
-                    writeln!(output, "  snez {}, {}", res, left).map_err(Error::InvalidFile)?;
+                        .map_err(Error::OutputError)?;
+                    writeln!(output, "  snez {}, {}", res, left).map_err(Error::OutputError)?;
                 }
                 _ => unimplemented!(),
             };

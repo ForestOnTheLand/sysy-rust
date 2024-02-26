@@ -1,7 +1,6 @@
 //! RISCV registers
 
 use core::fmt;
-use std::collections::HashSet;
 
 use crate::util::Error;
 
