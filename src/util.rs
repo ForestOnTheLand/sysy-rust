@@ -5,7 +5,11 @@ pub enum Error {
     MissingArgument,
     InvalidArgument,
     InvalidFile(io::Error),
-    InvalidFunctionName,
+    InvalidFunctionName, // function name of KoopaIR should begin with @
+    InvalidRegisterError,
+    RegisterAllocError,
+    RegisterFreeError,
+    InternalError,
 }
 
 pub enum Mode {

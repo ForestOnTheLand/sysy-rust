@@ -2,13 +2,14 @@
 //! Instead of implementing a `trait` as is described in the writeup,
 //! the core of the file is implemented in the function `translate_program`.
 
+use crate::register::*;
 use crate::util::Error;
-use koopa::ir::{dfg::DataFlowGraph, FunctionData, Program, Value, ValueKind};
-use std::io;
+use koopa::ir::{dfg::DataFlowGraph, BinaryOp, FunctionData, Program, Value, ValueKind};
+use std::{collections::HashMap, io};
 
 pub fn translate_program(program: &Program, output: &mut impl io::Write) -> Result<(), Error> {
     // Functions
-    output.write(b"  .text\n").map_err(Error::InvalidFile)?;
+    writeln!(output, "  .text").map_err(Error::InvalidFile)?;
     for &func in program.func_layout() {
         let func_data = program.func(func);
         translate_function(func_data, output)?;
@@ -22,12 +23,14 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
         .strip_prefix("@")
         .ok_or(Error::InvalidFunctionName)?;
     let dfg = func_data.dfg();
-    output
-        .write(format!("  .global {}\n{}:\n", func_name, func_name).as_bytes())
-        .map_err(Error::InvalidFile)?;
+    writeln!(output, "  .global {}\n{}:", func_name, func_name).map_err(Error::InvalidFile)?;
+
+    let mut table = RegisterTable::new();
+    let mut symbol: HashMap<Value, Register> = HashMap::new();
+
     for (&_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
-            translate_value(inst, dfg, output)?;
+            translate_value(inst, dfg, output, &mut table, &mut symbol)?;
         }
     }
     Ok(())
@@ -39,24 +42,125 @@ fn translate_value(
     value: Value,
     dfg: &DataFlowGraph,
     output: &mut impl io::Write,
-) -> Result<(), Error> {
-    let value_data = dfg.value(value);
-    match value_data.kind() {
+    table: &mut RegisterTable,
+    symbol: &mut HashMap<Value, Register>,
+) -> Result<Register, Error> {
+    // If value is already handled before, just return it directly.
+    if let Some(reg) = symbol.get(&value) {
+        return Ok(*reg);
+    }
+
+    // Where the result is stored
+    let result = match dfg.value(value).kind() {
         ValueKind::Integer(int) => {
-            output
-                .write(format!("  li a0, {}\n", int.value()).as_bytes())
-                .map_err(Error::InvalidFile)?;
+            if int.value() == 0 {
+                Register::new(0)?
+            } else {
+                let reg = table.get_vaccant()?;
+                writeln!(output, "  li {}, {}", reg, int.value()).map_err(Error::InvalidFile)?;
+                reg
+            }
         }
+
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
-                    translate_value(val, dfg, output)?;
+                    let reg = match symbol.get(&val) {
+                        Some(r) => r,
+                        None => {
+                            translate_value(val, dfg, output, table, symbol)?;
+                            symbol.get(&val).unwrap()
+                        }
+                    };
+                    if reg.id != 0 {
+                        writeln!(output, "  mv a0, {}", reg).map_err(Error::InvalidFile)?;
+                    }
                 }
                 None => {}
             }
-            output.write(b"  ret\n").map_err(Error::InvalidFile)?;
+            writeln!(output, "  ret").map_err(Error::InvalidFile)?;
+            Register::new(10)?
         }
-        _ => unreachable!(),
-    }
-    Ok(())
+
+        ValueKind::Binary(bin) => {
+            let left = translate_value(bin.lhs(), dfg, output, table, symbol)?;
+            let right = translate_value(bin.rhs(), dfg, output, table, symbol)?;
+            table.reset(left)?;
+            table.reset(right)?;
+            let res = table.get_vaccant()?;
+
+            match bin.op() {
+                // + -
+                BinaryOp::Add => {
+                    writeln!(output, "  add {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Sub => {
+                    writeln!(output, "  sub {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                // * / %
+                BinaryOp::Mul => {
+                    writeln!(output, "  mul {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Div => {
+                    writeln!(output, "  div {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Mod => {
+                    writeln!(output, "  rem {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                // &
+                BinaryOp::And => {
+                    writeln!(output, "  and {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                // |
+                BinaryOp::Or => {
+                    writeln!(output, "  or {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                // < <= > >=
+                BinaryOp::Lt => {
+                    writeln!(output, "  slt {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Le => {
+                    writeln!(output, "  sgt {}, {}, {}", res, right, left)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Gt => {
+                    writeln!(output, "  sgt {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::Ge => {
+                    writeln!(output, "  slt {}, {}, {}", res, right, left)
+                        .map_err(Error::InvalidFile)?;
+                }
+                // == !=
+                BinaryOp::Eq => {
+                    writeln!(output, "  xor {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                    writeln!(output, "  seqz {}, {}", res, left).map_err(Error::InvalidFile)?;
+                }
+                BinaryOp::NotEq => {
+                    writeln!(output, "  xor {}, {}, {}", res, left, right)
+                        .map_err(Error::InvalidFile)?;
+                    writeln!(output, "  snez {}, {}", res, left).map_err(Error::InvalidFile)?;
+                }
+                _ => unimplemented!(),
+            };
+
+            res
+        }
+
+        _ => unimplemented!(),
+    };
+
+    // And insert it after getting `result`
+    symbol.insert(value, result);
+
+    Ok(result)
 }
