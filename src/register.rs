@@ -21,7 +21,9 @@ impl Register {
         if id < 32 {
             Ok(Register { id })
         } else {
-            Err(Error::InvalidRegisterError)
+            Err(Error::InternalError(format!(
+                "register id '{id}' out of range"
+            )))
         }
     }
 
@@ -52,10 +54,14 @@ impl RegisterTable {
         for id in TMP_REG {
             if !self.state[id as usize] {
                 self.state[id as usize] = true;
-                return Register::new(id).or(Err(Error::InternalError));
+                return Register::new(id).or(Err(Error::InternalError(format!(
+                    "register id '{id}' out of range"
+                ))));
             }
         }
-        Err(Error::RegisterAllocError)
+        Err(Error::InternalError(
+            "no available registers now".to_string(),
+        ))
     }
 
     pub fn reset(&mut self, reg: Register) -> Result<(), Error> {
@@ -66,7 +72,9 @@ impl RegisterTable {
             self.state[reg.id as usize] = false;
             Ok(())
         } else {
-            Err(Error::RegisterFreeError)
+            Err(Error::InternalError(format!(
+                "register {reg} is not being occupied now"
+            )))
         }
     }
 }

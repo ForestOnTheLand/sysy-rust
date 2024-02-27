@@ -30,11 +30,33 @@ BlockItem: Box<BlockItem> = {
     Decl => Box::new(BlockItem::Decl( <> )),
     Stmt => Box::new(BlockItem::Stmt( <> )),
 }
-// Stmt ::= "return" Exp ";";
-Stmt: Box<Stmt> = "return" <exp: Exp> ";" => Box::new(Stmt { <> });
+// Stmt ::= LVal "=" Exp ";" | "return" Exp ";";
+Stmt: Box<Stmt> = {
+    <LVal> "=" <Exp> ";" => Box::new(Stmt::Assign( <> )),
+    "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )),
+}
 
-// Decl ::= ConstDecl;
-Decl: Box<Decl> = <const_decl: ConstDecl> => Box::new(Decl { <> });
+// Decl ::= ConstDecl | VarDecl;
+Decl: Box<Decl> = {
+    ConstDecl => Box::new(Decl::Const( <> )),
+    VarDecl => Box::new(Decl::Var( <> )),
+}
+// VarDecl ::= BType VarDef {"," VarDef} ";";
+VarDecl: Box<VarDecl> = <btype: BType> <mut var_defs: (<VarDef> ",")*> <var_def: VarDef> ";" => {
+    var_defs.push(var_def);
+    Box::new(VarDecl {
+        btype: btype,
+        var_defs: var_defs,
+    })
+};
+// VarDef ::= IDENT | IDENT "=" InitVal;
+VarDef: Box<VarDef> = {
+    <ident: Ident> => Box::new(VarDef {ident, init_val: None} ),
+    <ident: Ident> "=" <init_val: InitVal> => Box::new(VarDef {ident, init_val: Some(init_val)} ),
+}
+// InitVal ::= Exp;
+InitVal: Box<InitVal> = <exp: Exp> => Box::new(InitVal { <> });
+
 // ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
 ConstDecl: Box<ConstDecl> = "const" <btype: BType> <mut const_defs: (<ConstDef> ",")*> <const_def: ConstDef> ";" => {
     const_defs.push(const_def);

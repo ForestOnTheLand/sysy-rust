@@ -7,6 +7,8 @@ mod ast;
 mod builder;
 /// RISCV Register
 mod register;
+/// Symbol table
+mod symtab;
 /// Translate KoopaIR into RISCV
 mod translator;
 /// Util functions

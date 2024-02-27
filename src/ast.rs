@@ -33,16 +33,37 @@ pub enum BlockItem {
     Stmt(Box<Stmt>),
 }
 
-/// `Stmt ::= "return" Exp ";"`
+/// `Stmt ::= LVal "=" Exp ";" | "return" Exp ";"`
 #[derive(Debug)]
-pub struct Stmt {
-    pub exp: Box<Exp>,
+pub enum Stmt {
+    Assign(LVal, Box<Exp>),
+    Return(Box<Exp>),
 }
 
-/// Decl ::= ConstDecl;
+/// Decl ::= ConstDecl | VarDecl;
 #[derive(Debug)]
-pub struct Decl {
-    pub const_decl: Box<ConstDecl>,
+pub enum Decl {
+    Const(Box<ConstDecl>),
+    Var(Box<VarDecl>),
+}
+
+/// VarDecl ::= BType VarDef {"," VarDef} ";";
+#[derive(Debug)]
+pub struct VarDecl {
+    pub btype: BType,
+    pub var_defs: Vec<Box<VarDef>>,
+}
+
+/// VarDef ::= IDENT | IDENT "=" InitVal;
+#[derive(Debug)]
+pub struct VarDef {
+    pub ident: String,
+    pub init_val: Option<Box<InitVal>>,
+}
+/// InitVal ::= Exp;
+#[derive(Debug)]
+pub struct InitVal {
+    pub exp: Box<Exp>,
 }
 
 /// ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
