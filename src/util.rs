@@ -10,6 +10,7 @@ pub enum Error {
     RegisterAllocError,
     RegisterFreeError,
     InternalError,
+    NameError,
 }
 
 pub enum Mode {

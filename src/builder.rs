@@ -6,6 +6,7 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
 
+use std::collections::HashMap;
 // use std::error::Error;
 use std::io;
 
@@ -18,7 +19,13 @@ macro_rules! new_inst {
             .bb_mut($bb)
             .insts_mut()
             .push_key_back($inst)
-            .unwrap();
+            .unwrap()
+    };
+}
+
+macro_rules! new_value {
+    ($func:expr) => {
+        $func.dfg_mut().new_value()
     };
 }
 
@@ -47,45 +54,200 @@ fn build_function(program: &mut Program, func_def: &FuncDef) -> Result<(), Error
 }
 
 fn build_block(func: &mut FunctionData, block: &Block) -> Result<(), Error> {
-    let stmt = &block.stmt;
-
     let entry = func.dfg_mut().new_bb().basic_block(Some("%entry".into()));
     func.layout_mut().bbs_mut().push_key_back(entry).unwrap();
 
-    let ret_val = build_exp(func, entry, stmt.exp.as_ref())?;
-    let ret = func.dfg_mut().new_value().ret(Some(ret_val));
-    new_inst!(func, entry, ret);
+    let mut symtab: HashMap<String, i32> = HashMap::new();
+
+    for block_item in block.block_items.iter() {
+        build_block_item(func, entry, block_item, &mut symtab)?;
+    }
 
     Ok(())
 }
 
-fn build_exp(func: &mut FunctionData, bb: BasicBlock, exp: &Exp) -> Result<Value, Error> {
-    build_lor_exp(func, bb, exp.lor_exp.as_ref())
+fn build_block_item(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    item: &BlockItem,
+    symtab: &mut HashMap<String, i32>,
+) -> Result<(), Error> {
+    match item {
+        BlockItem::Decl(decl) => build_decl(&decl, symtab),
+        BlockItem::Stmt(stmt) => build_stmt(func, bb, &stmt, symtab),
+    }
+}
+
+fn build_decl(decl: &Decl, symtab: &mut HashMap<String, i32>) -> Result<(), Error> {
+    build_const_decl(&decl.const_decl, symtab)
+}
+
+fn build_const_decl(decl: &ConstDecl, symtab: &mut HashMap<String, i32>) -> Result<(), Error> {
+    for def in decl.const_defs.iter() {
+        build_const_def(def, symtab)?;
+    }
+    Ok(())
+}
+
+fn build_const_def(decl: &ConstDef, symtab: &mut HashMap<String, i32>) -> Result<(), Error> {
+    let value = compute_init_value(&decl.const_init_val, symtab)?;
+    symtab.insert(decl.ident.clone(), value);
+    Ok(())
+}
+
+fn compute_init_value(init: &ConstInitVal, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    compute_exp(&init.const_exp.exp, symtab)
+}
+
+fn compute_exp(exp: &Exp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    compute_lor_exp(&exp.lor_exp, symtab)
+}
+
+fn compute_unary_exp(exp: &UnaryExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        UnaryExp::Single(exp) => compute_primary_exp(exp, symtab),
+        UnaryExp::Unary(op, exp) => {
+            let val = compute_unary_exp(exp, symtab)?;
+            Ok(match op {
+                UnaryOp::Pos => val,
+                UnaryOp::Neg => -val,
+                UnaryOp::Not => !val,
+            })
+        }
+    }
+}
+
+fn compute_primary_exp(exp: &PrimaryExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
+        PrimaryExp::Number(val) => Ok(*val),
+        PrimaryExp::LVal(lval) => Ok(*symtab.get(&lval.ident).ok_or(Error::NameError)?),
+    }
+}
+
+fn compute_mul_exp(exp: &MulExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        MulExp::Single(exp) => compute_unary_exp(exp, symtab),
+        MulExp::Binary(left, op, right) => {
+            let left = compute_mul_exp(left, symtab)?;
+            let right = compute_unary_exp(right, symtab)?;
+            Ok(match op {
+                MulOp::Mul => left * right,
+                MulOp::Div => left / right,
+                MulOp::Mod => left % right,
+            })
+        }
+    }
+}
+
+fn compute_add_exp(exp: &AddExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        AddExp::Single(exp) => compute_mul_exp(exp, symtab),
+        AddExp::Binary(left, op, right) => {
+            let left = compute_add_exp(left, symtab)?;
+            let right = compute_mul_exp(right, symtab)?;
+            Ok(match op {
+                AddOp::Add => left + right,
+                AddOp::Sub => left - right,
+            })
+        }
+    }
+}
+
+fn compute_rel_exp(exp: &RelExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        RelExp::Single(exp) => compute_add_exp(exp, symtab),
+        RelExp::Binary(left, op, right) => {
+            let left = compute_rel_exp(left, symtab)?;
+            let right = compute_add_exp(right, symtab)?;
+            Ok(match op {
+                RelOp::Ge => left >= right,
+                RelOp::Gt => left > right,
+                RelOp::Le => left <= right,
+                RelOp::Lt => left < right,
+            } as i32)
+        }
+    }
+}
+
+fn compute_eq_exp(exp: &EqExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        EqExp::Single(exp) => compute_rel_exp(exp, symtab),
+        EqExp::Binary(left, op, right) => {
+            let left = compute_eq_exp(left, symtab)?;
+            let right = compute_rel_exp(right, symtab)?;
+            Ok(match op {
+                EqOp::Eq => left == right,
+                EqOp::Neq => left != right,
+            } as i32)
+        }
+    }
+}
+
+fn compute_land_exp(exp: &LAndExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        LAndExp::Single(exp) => compute_eq_exp(exp, symtab),
+        LAndExp::Binary(left, right) => {
+            let left = compute_land_exp(left, symtab)?;
+            let right = compute_eq_exp(right, symtab)?;
+            Ok((left != 0 && right != 0) as i32)
+        }
+    }
+}
+
+fn compute_lor_exp(exp: &LOrExp, symtab: &HashMap<String, i32>) -> Result<i32, Error> {
+    match exp {
+        LOrExp::Single(exp) => compute_land_exp(exp, symtab),
+        LOrExp::Binary(left, right) => {
+            let left = compute_lor_exp(left, symtab)?;
+            let right = compute_land_exp(right, symtab)?;
+            Ok((left != 0 || right != 0) as i32)
+        }
+    }
+}
+
+fn build_stmt(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    stmt: &Stmt,
+    symtab: &HashMap<String, i32>,
+) -> Result<(), Error> {
+    let ret_val = build_exp(func, bb, &stmt.exp, symtab)?;
+    let ret = new_value!(func).ret(Some(ret_val));
+    new_inst!(func, bb, ret);
+    Ok(())
+}
+
+fn build_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &Exp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
+    build_lor_exp(func, bb, &exp.lor_exp, symtab)
 }
 
 fn build_unary_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     exp: &UnaryExp,
+    symtab: &HashMap<String, i32>,
 ) -> Result<Value, Error> {
     match exp {
-        UnaryExp::Single(exp) => build_primary_exp(func, bb, exp),
+        UnaryExp::Single(exp) => build_primary_exp(func, bb, exp, symtab),
         UnaryExp::Unary(unary_op, exp) => {
-            let value = build_unary_exp(func, bb, exp)?;
+            let value = build_unary_exp(func, bb, exp, symtab)?;
             match unary_op {
                 UnaryOp::Pos => Ok(value),
                 UnaryOp::Neg => {
-                    let zero = func.dfg_mut().new_value().integer(0);
-                    let neg = func
-                        .dfg_mut()
-                        .new_value()
-                        .binary(BinaryOp::Sub, zero, value);
+                    let zero = new_value!(func).integer(0);
+                    let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
                     new_inst!(func, bb, neg);
                     Ok(neg)
                 }
                 UnaryOp::Not => {
-                    let zero = func.dfg_mut().new_value().integer(0);
-                    let not = func.dfg_mut().new_value().binary(BinaryOp::Eq, value, zero);
+                    let zero = new_value!(func).integer(0);
+                    let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
                     new_inst!(func, bb, not);
                     Ok(not)
                 }
@@ -98,20 +260,30 @@ fn build_primary_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     exp: &PrimaryExp,
+    symtab: &HashMap<String, i32>,
 ) -> Result<Value, Error> {
     match exp {
-        PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref()),
-        PrimaryExp::Number(num) => Ok(func.dfg_mut().new_value().integer(*num)),
+        PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
+        PrimaryExp::Number(num) => Ok(new_value!(func).integer(*num)),
+        PrimaryExp::LVal(lval) => {
+            let v = symtab.get(&lval.ident).ok_or(Error::NameError)?;
+            Ok(new_value!(func).integer(*v))
+        }
     }
 }
 
-fn build_mul_exp(func: &mut FunctionData, bb: BasicBlock, exp: &MulExp) -> Result<Value, Error> {
+fn build_mul_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &MulExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        MulExp::Single(exp) => build_unary_exp(func, bb, exp),
+        MulExp::Single(exp) => build_unary_exp(func, bb, exp, symtab),
         MulExp::Binary(left, op, right) => {
-            let left = build_mul_exp(func, bb, left)?;
-            let right = build_unary_exp(func, bb, right)?;
-            let value = func.dfg_mut().new_value().binary(
+            let left = build_mul_exp(func, bb, left, symtab)?;
+            let right = build_unary_exp(func, bb, right, symtab)?;
+            let value = new_value!(func).binary(
                 match op {
                     MulOp::Mul => BinaryOp::Mul,
                     MulOp::Div => BinaryOp::Div,
@@ -126,13 +298,18 @@ fn build_mul_exp(func: &mut FunctionData, bb: BasicBlock, exp: &MulExp) -> Resul
     }
 }
 
-fn build_add_exp(func: &mut FunctionData, bb: BasicBlock, exp: &AddExp) -> Result<Value, Error> {
+fn build_add_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &AddExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        AddExp::Single(exp) => build_mul_exp(func, bb, exp),
+        AddExp::Single(exp) => build_mul_exp(func, bb, exp, symtab),
         AddExp::Binary(left, op, right) => {
-            let left = build_add_exp(func, bb, left)?;
-            let right = build_mul_exp(func, bb, right)?;
-            let value = func.dfg_mut().new_value().binary(
+            let left = build_add_exp(func, bb, left, symtab)?;
+            let right = build_mul_exp(func, bb, right, symtab)?;
+            let value = new_value!(func).binary(
                 match op {
                     AddOp::Add => BinaryOp::Add,
                     AddOp::Sub => BinaryOp::Sub,
@@ -146,13 +323,18 @@ fn build_add_exp(func: &mut FunctionData, bb: BasicBlock, exp: &AddExp) -> Resul
     }
 }
 
-fn build_rel_exp(func: &mut FunctionData, bb: BasicBlock, exp: &RelExp) -> Result<Value, Error> {
+fn build_rel_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &RelExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        RelExp::Single(exp) => build_add_exp(func, bb, exp),
+        RelExp::Single(exp) => build_add_exp(func, bb, exp, symtab),
         RelExp::Binary(left, op, right) => {
-            let left = build_rel_exp(func, bb, left)?;
-            let right = build_add_exp(func, bb, right)?;
-            let value = func.dfg_mut().new_value().binary(
+            let left = build_rel_exp(func, bb, left, symtab)?;
+            let right = build_add_exp(func, bb, right, symtab)?;
+            let value = new_value!(func).binary(
                 match op {
                     RelOp::Lt => BinaryOp::Lt,
                     RelOp::Le => BinaryOp::Le,
@@ -168,13 +350,18 @@ fn build_rel_exp(func: &mut FunctionData, bb: BasicBlock, exp: &RelExp) -> Resul
     }
 }
 
-fn build_eq_exp(func: &mut FunctionData, bb: BasicBlock, exp: &EqExp) -> Result<Value, Error> {
+fn build_eq_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &EqExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        EqExp::Single(exp) => build_rel_exp(func, bb, exp),
+        EqExp::Single(exp) => build_rel_exp(func, bb, exp, symtab),
         EqExp::Binary(left, op, right) => {
-            let left = build_eq_exp(func, bb, left)?;
-            let right = build_rel_exp(func, bb, right)?;
-            let value = func.dfg_mut().new_value().binary(
+            let left = build_eq_exp(func, bb, left, symtab)?;
+            let right = build_rel_exp(func, bb, right, symtab)?;
+            let value = new_value!(func).binary(
                 match op {
                     EqOp::Eq => BinaryOp::Eq,
                     EqOp::Neq => BinaryOp::NotEq,
@@ -189,24 +376,23 @@ fn build_eq_exp(func: &mut FunctionData, bb: BasicBlock, exp: &EqExp) -> Result<
 }
 
 /// `a && b ` is equivalent to `(a != 0) & (b != 0)`
-fn build_land_exp(func: &mut FunctionData, bb: BasicBlock, exp: &LAndExp) -> Result<Value, Error> {
+fn build_land_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &LAndExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        LAndExp::Single(exp) => build_eq_exp(func, bb, exp),
+        LAndExp::Single(exp) => build_eq_exp(func, bb, exp, symtab),
         LAndExp::Binary(left, right) => {
-            let zero = func.dfg_mut().new_value().integer(0);
-            let left = build_land_exp(func, bb, left)?;
-            let l = func
-                .dfg_mut()
-                .new_value()
-                .binary(BinaryOp::NotEq, left, zero);
+            let zero = new_value!(func).integer(0);
+            let left = build_land_exp(func, bb, left, symtab)?;
+            let l = new_value!(func).binary(BinaryOp::NotEq, left, zero);
             new_inst!(func, bb, l);
-            let right = build_eq_exp(func, bb, right)?;
-            let r = func
-                .dfg_mut()
-                .new_value()
-                .binary(BinaryOp::NotEq, right, zero);
+            let right = build_eq_exp(func, bb, right, symtab)?;
+            let r = new_value!(func).binary(BinaryOp::NotEq, right, zero);
             new_inst!(func, bb, r);
-            let value = func.dfg_mut().new_value().binary(BinaryOp::And, l, r);
+            let value = new_value!(func).binary(BinaryOp::And, l, r);
             new_inst!(func, bb, value);
             Ok(value)
         }
@@ -214,16 +400,21 @@ fn build_land_exp(func: &mut FunctionData, bb: BasicBlock, exp: &LAndExp) -> Res
 }
 
 /// `a || b ` is equivalent to `(a | b) != 0`
-fn build_lor_exp(func: &mut FunctionData, bb: BasicBlock, exp: &LOrExp) -> Result<Value, Error> {
+fn build_lor_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    exp: &LOrExp,
+    symtab: &HashMap<String, i32>,
+) -> Result<Value, Error> {
     match exp {
-        LOrExp::Single(exp) => build_land_exp(func, bb, exp),
+        LOrExp::Single(exp) => build_land_exp(func, bb, exp, symtab),
         LOrExp::Binary(left, right) => {
-            let zero = func.dfg_mut().new_value().integer(0);
-            let left = build_lor_exp(func, bb, left)?;
-            let right = build_land_exp(func, bb, right)?;
-            let or = func.dfg_mut().new_value().binary(BinaryOp::Or, left, right);
+            let zero = new_value!(func).integer(0);
+            let left = build_lor_exp(func, bb, left, symtab)?;
+            let right = build_land_exp(func, bb, right, symtab)?;
+            let or = new_value!(func).binary(BinaryOp::Or, left, right);
             new_inst!(func, bb, or);
-            let value = func.dfg_mut().new_value().binary(BinaryOp::NotEq, or, zero);
+            let value = new_value!(func).binary(BinaryOp::NotEq, or, zero);
             new_inst!(func, bb, value);
             Ok(value)
         }

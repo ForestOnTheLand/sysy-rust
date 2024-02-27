@@ -23,16 +23,45 @@ FuncDef: FuncDef = {
 
 FuncType: FuncType = "int" => FuncType::Int;
 
-Block: Block = "{" <stmt: Stmt> "}" => Block { <> };
-
+// Block ::= "{" {BlockItem} "}";
+Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
+// BlockItem ::= Decl | Stmt;
+BlockItem: Box<BlockItem> = {
+    Decl => Box::new(BlockItem::Decl( <> )),
+    Stmt => Box::new(BlockItem::Stmt( <> )),
+}
 // Stmt ::= "return" Exp ";";
-Stmt: Stmt = "return" <exp: Exp> ";" => Stmt { <> };
+Stmt: Box<Stmt> = "return" <exp: Exp> ";" => Box::new(Stmt { <> });
+
+// Decl ::= ConstDecl;
+Decl: Box<Decl> = <const_decl: ConstDecl> => Box::new(Decl { <> });
+// ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
+ConstDecl: Box<ConstDecl> = "const" <btype: BType> <mut const_defs: (<ConstDef> ",")*> <const_def: ConstDef> ";" => {
+    const_defs.push(const_def);
+    Box::new(ConstDecl {
+        btype: btype,
+        const_defs: const_defs,
+    })
+};
+// BType ::= "int";
+BType: BType = "int" => BType::Int;
+// ConstDef ::= IDENT "=" ConstInitVal;
+ConstDef: Box<ConstDef> = <ident: Ident> "=" <const_init_val: ConstInitVal> => Box::new(ConstDef { <> });
+// ConstInitVal ::= ConstExp;
+ConstInitVal: Box<ConstInitVal> = <const_exp: ConstExp> => Box::new(ConstInitVal { <> });
+
+// LVal ::= IDENT;
+LVal: LVal = <ident: Ident> => LVal { <> };
+
+// ConstExp ::= Exp;
+ConstExp: Box<ConstExp> = <exp: Exp> => Box::new(ConstExp { <> });
 
 // Exp ::= LOrExp;
 Exp: Box<Exp> = <lor_exp: LOrExp> => Box::new(Exp { <> });
-// PrimaryExp ::= "(" Exp ")" | Number;
+// PrimaryExp ::= "(" Exp ")" | LVal | Number;
 PrimaryExp: Box<PrimaryExp> = {
     "(" <Exp> ")" => Box::new(PrimaryExp::Expression( <> )),
+    LVal => Box::new(PrimaryExp::LVal( <> )),
     Number => Box::new(PrimaryExp::Number( <> )),
 }
 // UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;

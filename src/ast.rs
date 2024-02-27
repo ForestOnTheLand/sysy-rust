@@ -20,15 +20,66 @@ pub enum FuncType {
     Int,
 }
 
-/// `Block ::= "{" Stmt "}"`
+/// Block ::= "{" {BlockItem} "}";
 #[derive(Debug)]
 pub struct Block {
-    pub stmt: Stmt,
+    pub block_items: Vec<Box<BlockItem>>,
+}
+
+/// BlockItem ::= Decl | Stmt;
+#[derive(Debug)]
+pub enum BlockItem {
+    Decl(Box<Decl>),
+    Stmt(Box<Stmt>),
 }
 
 /// `Stmt ::= "return" Exp ";"`
 #[derive(Debug)]
 pub struct Stmt {
+    pub exp: Box<Exp>,
+}
+
+/// Decl ::= ConstDecl;
+#[derive(Debug)]
+pub struct Decl {
+    pub const_decl: Box<ConstDecl>,
+}
+
+/// ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
+#[derive(Debug)]
+pub struct ConstDecl {
+    pub btype: BType,
+    pub const_defs: Vec<Box<ConstDef>>,
+}
+
+/// BType ::= "int";
+#[derive(Debug)]
+pub enum BType {
+    Int,
+}
+
+/// ConstDef ::= IDENT "=" ConstInitVal;
+#[derive(Debug)]
+pub struct ConstDef {
+    pub ident: String,
+    pub const_init_val: Box<ConstInitVal>,
+}
+
+/// ConstInitVal ::= ConstExp;
+#[derive(Debug)]
+pub struct ConstInitVal {
+    pub const_exp: Box<ConstExp>,
+}
+
+/// LVal ::= IDENT;
+#[derive(Debug)]
+pub struct LVal {
+    pub ident: String,
+}
+
+/// ConstExp ::= Exp;
+#[derive(Debug)]
+pub struct ConstExp {
     pub exp: Box<Exp>,
 }
 
@@ -38,10 +89,11 @@ pub struct Exp {
     pub lor_exp: Box<LOrExp>,
 }
 
-/// PrimaryExp ::= "(" Exp ")" | Number;
+/// PrimaryExp ::= "(" Exp ")" | LVal | Number;
 #[derive(Debug)]
 pub enum PrimaryExp {
     Expression(Box<Exp>),
+    LVal(LVal),
     Number(i32),
 }
 
