@@ -1,7 +1,7 @@
 //! In this file, the conversion from AST to KoopaIR is provided.
 
 use crate::ast::*;
-use crate::symtab::Symbol;
+use crate::symtab::{Symbol, SymbolTable};
 use crate::util::Error;
 use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
@@ -29,8 +29,6 @@ macro_rules! new_value {
         $func.dfg_mut().new_value()
     };
 }
-
-type SymbolTable = HashMap<String, Symbol>;
 
 pub fn output_program(program: &Program, output: impl io::Write) {
     KoopaGenerator::new(output).generate_on(program).unwrap();
@@ -60,7 +58,7 @@ fn build_block(func: &mut FunctionData, block: &Block) -> Result<(), Error> {
     let entry = func.dfg_mut().new_bb().basic_block(Some("%entry".into()));
     func.layout_mut().bbs_mut().push_key_back(entry).unwrap();
 
-    let mut symtab: SymbolTable = HashMap::new();
+    let mut symtab = SymbolTable::new();
 
     for block_item in block.block_items.iter() {
         build_block_item(func, entry, block_item, &mut symtab)?;
@@ -76,16 +74,59 @@ fn build_block_item(
     symtab: &mut SymbolTable,
 ) -> Result<(), Error> {
     match item {
-        BlockItem::Decl(decl) => build_decl(&decl, symtab),
+        BlockItem::Decl(decl) => build_decl(func, bb, &decl, symtab),
         BlockItem::Stmt(stmt) => build_stmt(func, bb, &stmt, symtab),
     }
 }
 
-fn build_decl(decl: &Decl, symtab: &mut SymbolTable) -> Result<(), Error> {
+fn build_decl(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    decl: &Decl,
+    symtab: &mut SymbolTable,
+) -> Result<(), Error> {
     match decl {
         Decl::Const(decl) => build_const_decl(decl, symtab),
-        _ => unimplemented!(),
+        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab),
     }
+}
+
+fn build_var_decl(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    decl: &VarDecl,
+    symtab: &mut SymbolTable,
+) -> Result<(), Error> {
+    for def in decl.var_defs.iter() {
+        build_var_def(func, bb, def, symtab)?;
+    }
+    Ok(())
+}
+
+fn build_var_def(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    def: &VarDef,
+    symtab: &mut SymbolTable,
+) -> Result<(), Error> {
+    let var = new_value!(func).alloc(Type::get_i32());
+    new_inst!(func, bb, var);
+    if let Some(init_value) = &def.init_val {
+        let value = build_init_value(func, bb, &init_value, symtab)?;
+        let store = new_value!(func).store(value, var);
+        new_inst!(func, bb, store);
+    }
+    symtab.insert_var(&def.ident, var)?;
+    Ok(())
+}
+
+fn build_init_value(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    val: &InitVal,
+    symtab: &mut SymbolTable,
+) -> Result<Value, Error> {
+    build_exp(func, bb, &val.exp, symtab)
 }
 
 fn build_const_decl(decl: &ConstDecl, symtab: &mut SymbolTable) -> Result<(), Error> {
@@ -97,7 +138,7 @@ fn build_const_decl(decl: &ConstDecl, symtab: &mut SymbolTable) -> Result<(), Er
 
 fn build_const_def(decl: &ConstDef, symtab: &mut SymbolTable) -> Result<(), Error> {
     let value = compute_init_value(&decl.const_init_val, symtab)?;
-    symtab.insert(decl.ident.clone(), Symbol::Const(value));
+    symtab.insert_const(&decl.ident, value)?;
     Ok(())
 }
 
@@ -127,16 +168,7 @@ fn compute_primary_exp(exp: &PrimaryExp, symtab: &SymbolTable) -> Result<i32, Er
     match exp {
         PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
         PrimaryExp::Number(val) => Ok(*val),
-        PrimaryExp::LVal(lval) => match symtab.get(&lval.ident) {
-            Some(Symbol::Const(val)) => Ok(*val),
-            Some(Symbol::Var) => Err(Error::ParseError(
-                "fail to compute expression with variable at compile time".to_string(),
-            )),
-            None => Err(Error::ParseError(format!(
-                "identifier '{}' undefined",
-                lval.ident
-            ))),
-        },
+        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident),
     }
 }
 
@@ -228,7 +260,11 @@ fn build_stmt(
     symtab: &SymbolTable,
 ) -> Result<(), Error> {
     match stmt {
-        Stmt::Assign(lval, exp) => unimplemented!(),
+        Stmt::Assign(lval, exp) => {
+            let value = build_exp(func, bb, exp, symtab)?;
+            let store = new_value!(func).store(value, symtab.get_var(&lval.ident)?);
+            new_inst!(func, bb, store);
+        }
         Stmt::Return(exp) => {
             let ret_val = build_exp(func, bb, exp, symtab)?;
             let ret = new_value!(func).ret(Some(ret_val));
@@ -285,15 +321,13 @@ fn build_primary_exp(
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => Ok(new_value!(func).integer(*num)),
-        PrimaryExp::LVal(lval) => match symtab.get(&lval.ident) {
-            Some(Symbol::Const(val)) => Ok(new_value!(func).integer(*val)),
-            Some(Symbol::Var) => Err(Error::ParseError(
-                "fail to compute expression with variable at compile time".to_string(),
-            )),
-            None => Err(Error::ParseError(format!(
-                "identifier '{}' undefined",
-                lval.ident
-            ))),
+        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident)? {
+            Symbol::Const(val) => Ok(new_value!(func).integer(val)),
+            Symbol::Var(value) => {
+                let temp = new_value!(func).load(value);
+                new_inst!(func, bb, temp);
+                Ok(temp)
+            }
         },
     }
 }

@@ -27,6 +27,7 @@ impl Register {
         }
     }
 
+    #[allow(dead_code)]
     pub fn name(&self) -> &str {
         REG_NAME[self.id as usize]
     }

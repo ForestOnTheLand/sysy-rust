@@ -1,4 +1,3 @@
-use lalrpop_util;
 use std::{env, fmt, fs, io};
 
 #[derive(Debug)]
