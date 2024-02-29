@@ -45,17 +45,22 @@ const TMP_REG: [u8; 15] = [5, 6, 7, 28, 29, 30, 31, 10, 11, 12, 13, 14, 15, 16, 
 
 pub struct RegisterTable {
     state: [bool; 32],
+    available: i32,
 }
 
 impl RegisterTable {
     pub fn new() -> RegisterTable {
-        RegisterTable { state: [false; 32] }
+        RegisterTable {
+            state: [false; 32],
+            available: 15,
+        }
     }
 
     pub fn get_vaccant(&mut self) -> Result<Register, Error> {
         for id in TMP_REG {
             if !self.state[id as usize] {
                 self.state[id as usize] = true;
+                self.available -= 1;
                 return Register::new(id);
             }
         }
@@ -70,12 +75,17 @@ impl RegisterTable {
             Ok(())
         } else if self.state[reg.id as usize] {
             self.state[reg.id as usize] = false;
+            self.available += 1;
             Ok(())
         } else {
             Err(Error::InternalError(format!(
                 "register {reg} is not being occupied now"
             )))
         }
+    }
+
+    pub fn remain(&self) -> i32 {
+        self.available
     }
 }
 
