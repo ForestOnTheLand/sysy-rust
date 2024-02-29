@@ -7,7 +7,6 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
 
-use std::collections::HashMap;
 // use std::error::Error;
 use std::io;
 

@@ -1,8 +1,6 @@
-use std::{collections::HashMap, fmt::format};
-
-use koopa::ir::Value;
-
 use crate::util::Error;
+use koopa::ir::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Symbol {

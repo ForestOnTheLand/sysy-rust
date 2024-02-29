@@ -1,8 +1,9 @@
 //! RISCV registers
 
-use core::fmt;
-
 use crate::util::Error;
+use koopa::ir::Value;
+use std::collections::HashMap;
+use std::fmt;
 
 /// All 32 RISCV registers
 #[derive(Debug, Clone, Copy)]
@@ -55,9 +56,7 @@ impl RegisterTable {
         for id in TMP_REG {
             if !self.state[id as usize] {
                 self.state[id as usize] = true;
-                return Register::new(id).or(Err(Error::InternalError(format!(
-                    "register id '{id}' out of range"
-                ))));
+                return Register::new(id);
             }
         }
         Err(Error::InternalError(
@@ -76,6 +75,52 @@ impl RegisterTable {
             Err(Error::InternalError(format!(
                 "register {reg} is not being occupied now"
             )))
+        }
+    }
+}
+
+pub enum AllocPos {
+    Reg(Register),
+    Stack(i32),
+}
+
+pub struct AllocTable {
+    data: HashMap<Value, AllocPos>,
+}
+
+impl AllocTable {
+    pub fn new() -> AllocTable {
+        AllocTable {
+            data: HashMap::new(),
+        }
+    }
+
+    pub fn get(&self, value: &Value) -> Option<&AllocPos> {
+        self.data.get(value)
+    }
+
+    pub fn get_stack(&self, value: &Value) -> Option<i32> {
+        match self.data.get(value) {
+            Some(AllocPos::Stack(offset)) => Some(*offset),
+            _ => None,
+        }
+    }
+
+    pub fn store_register(&mut self, value: Value, reg: Register) -> Result<(), Error> {
+        match self.data.insert(value, AllocPos::Reg(reg)) {
+            None => Ok(()),
+            Some(_) => Err(Error::InternalError(
+                "value stored in register before".to_string(),
+            )),
+        }
+    }
+
+    pub fn store_stack(&mut self, value: Value, offset: i32) -> Result<(), Error> {
+        match self.data.insert(value, AllocPos::Stack(offset)) {
+            None => Ok(()),
+            Some(_) => Err(Error::InternalError(
+                "value stored in stack before".to_string(),
+            )),
         }
     }
 }

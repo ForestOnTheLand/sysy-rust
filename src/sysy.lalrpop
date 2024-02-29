@@ -8,7 +8,7 @@ match {
     // Skip Comment - Single-line
     r"//[^\n\r]*[\n\r]*" => {},
     // Skip Comment - Multi-line
-    r"/\*([^*]|\*[^/]+/)*\*/" => {},
+    r"/\*([^*]|\*+[^/]+)*\*+/" => {},
     // Default
     _
 }
