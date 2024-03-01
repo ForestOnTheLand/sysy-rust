@@ -7,7 +7,6 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
 
-use std::collections::HashSet;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -80,30 +79,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef) -> Result<(), Error
 
     build_block(func_data, bb, &func_def.block, &mut symtab)?;
 
-    // remove_unused(func_data);
-
     Ok(())
-}
-
-fn remove_unused(func_data: &mut FunctionData) {
-    let mut unused_bb = HashSet::new();
-    let mut unused_value = HashSet::new();
-    for (&bb, node) in func_data.layout().bbs() {
-        if let Some(name) = func_data.dfg().bb(bb).name() {
-            if name.starts_with("%unused") {
-                unused_bb.insert(bb);
-                for &inst in node.insts().keys() {
-                    unused_value.insert(inst);
-                }
-            }
-        }
-    }
-    for bb in unused_bb {
-        func_data.dfg_mut().remove_bb(bb);
-    }
-    for value in unused_value {
-        func_data.dfg_mut().remove_value(value);
-    }
 }
 
 fn build_block(

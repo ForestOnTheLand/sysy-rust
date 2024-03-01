@@ -4,8 +4,20 @@
 
 use crate::register::*;
 use crate::util::Error;
-use koopa::ir::{BinaryOp, FunctionData, Program, Value, ValueKind};
+use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Value, ValueKind};
 use std::io;
+
+fn block_tag(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
+    let name = func.dfg().bb(bb).name().as_ref();
+    let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
+    let name = name
+        .strip_prefix("%")
+        .ok_or(Error::InternalError(format!(
+            "invalid function name '{name}'  generated in koopa, expected to begin with '%'"
+        )))?
+        .to_string();
+    Ok(name)
+}
 
 pub fn translate_program(program: &Program, output: &mut impl io::Write) -> Result<(), Error> {
     // Functions
@@ -41,7 +53,11 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
         stack_pos: Box::new(0),
     };
 
-    for (_bb, node) in func_data.layout().bbs() {
+    for (&bb, node) in func_data.layout().bbs() {
+        let name = block_tag(func_data, bb)?;
+        if name != "entry" {
+            writeln!(output, "{name}:").map_err(Error::IOError)?;
+        }
         for &inst in node.insts().keys() {
             let on_stack = !func_data.dfg().value(inst).ty().is_unit() && config.table.remain() < 3;
             translate_instruction(inst, output, &mut config, on_stack)?;
@@ -55,7 +71,6 @@ fn get_stack_size(func_data: &FunctionData) -> i32 {
     let mut counter = 0;
     for (_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
-            println!("{:#?}", inst);
             if !func_data.dfg().value(inst).ty().is_unit() {
                 counter += 4;
             }
@@ -135,7 +150,7 @@ fn translate_instruction(
                 BinaryOp::Gt => writeln!(output, "  sgt {res}, {left}, {right}"),
                 BinaryOp::Ge => writeln!(output, "  slt {res}, {right}, {left}"),
                 BinaryOp::Eq => {
-                    writeln!(output, "  xor {res}, {left}, {right}\n  seqz {res}. {left}")
+                    writeln!(output, "  xor {res}, {left}, {right}\n  seqz {res}, {left}")
                 }
                 BinaryOp::NotEq => {
                     writeln!(output, "  xor {res}, {left}, {right}\n  snez {res}, {left}")
@@ -171,6 +186,22 @@ fn translate_instruction(
             Some(reg)
         }
 
+        ValueKind::Branch(branch) => {
+            let cond = translate_value(branch.cond(), output, config)?;
+            let then_tag = block_tag(config.func_data, branch.true_bb())?;
+            let else_tag = block_tag(config.func_data, branch.false_bb())?;
+            writeln!(output, "  bnez {cond}, {then_tag}").map_err(Error::IOError)?;
+            config.table.reset(cond)?;
+            writeln!(output, "  j {else_tag}").map_err(Error::IOError)?;
+            None
+        }
+
+        ValueKind::Jump(jump) => {
+            let jmp_tag = block_tag(config.func_data, jump.target())?;
+            writeln!(output, "  j {jmp_tag}").map_err(Error::IOError)?;
+            None
+        }
+
         _ => unimplemented!(),
     };
 
@@ -184,7 +215,10 @@ fn translate_instruction(
         return Ok(());
     }
 
-    let reg = reg.ok_or(Error::InternalError("???".to_string()))?;
+    let reg = reg.ok_or(Error::InternalError(format!(
+        "{:#?} is non-void type",
+        config.func_data.dfg().value(value)
+    )))?;
 
     if on_stack {
         config.symbol.store_stack(value, *config.stack_pos)?;

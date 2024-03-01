@@ -14,8 +14,6 @@ mod translator;
 /// Util functions
 mod util;
 
-use std::io::stdout;
-
 use lalrpop_util::lalrpop_mod;
 
 lalrpop_mod!(sysy);
