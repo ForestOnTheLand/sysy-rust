@@ -29,7 +29,9 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
 
     let stack_size = get_stack_size(func_data);
 
-    writeln!(output, "  addi sp, sp, -{}", stack_size).map_err(Error::IOError)?;
+    if stack_size > 0 {
+        writeln!(output, "  addi sp, sp, -{}", stack_size).map_err(Error::IOError)?;
+    }
 
     let mut config = TranslateConfig {
         func_data,
@@ -59,8 +61,6 @@ fn get_stack_size(func_data: &FunctionData) -> i32 {
             }
         }
     }
-
-    println!("{counter}");
 
     // Note that we need to align the size as a multiple of 16
     (counter + 15) & !0xf
@@ -108,7 +108,9 @@ fn translate_instruction(
                 }
                 None => {}
             };
-            writeln!(output, "  addi sp, sp, {}", config.stack_size).map_err(Error::IOError)?;
+            if config.stack_size > 0 {
+                writeln!(output, "  addi sp, sp, {}", config.stack_size).map_err(Error::IOError)?;
+            }
             writeln!(output, "  ret").map_err(Error::IOError)?;
             None
         }
@@ -188,10 +190,10 @@ fn translate_instruction(
         config.symbol.store_stack(value, *config.stack_pos)?;
         config.table.reset(reg)?;
         writeln!(output, "  sw {}, {}(sp)", reg, config.stack_pos).map_err(Error::IOError)?;
-        writeln!(output, "  # allocated at {}(sp)", config.stack_pos).map_err(Error::IOError)?;
+        writeln!(output, "  # alloc at {}(sp)", config.stack_pos).map_err(Error::IOError)?;
         *config.stack_pos += 4;
     } else {
-        writeln!(output, "  # allocated at {}", reg).map_err(Error::IOError)?;
+        writeln!(output, "  # alloc at {}", reg).map_err(Error::IOError)?;
         config.symbol.store_register(value, reg)?;
     }
 

@@ -109,6 +109,8 @@ fn build_var_def(
     symtab: &mut SymbolTable,
 ) -> Result<(), Error> {
     let var = new_value!(func).alloc(Type::get_i32());
+    func.dfg_mut()
+        .set_value_name(var, Some(format!("@{}", def.ident)));
     new_inst!(func, bb, var);
     if let Some(init_value) = &def.init_val {
         let value = build_init_value(func, bb, &init_value, symtab)?;
