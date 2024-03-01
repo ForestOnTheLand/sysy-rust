@@ -48,22 +48,35 @@ fn build_function(program: &mut Program, func_def: &FuncDef) -> Result<(), Error
         },
     );
     let func = program.new_func(func);
-    build_block(program.func_mut(func), &func_def.block)?;
+    let mut symtab = SymbolTable::new();
+
+    let func_data = program.func_mut(func);
+    let entry = func_data
+        .dfg_mut()
+        .new_bb()
+        .basic_block(Some("%entry".into()));
+    func_data
+        .layout_mut()
+        .bbs_mut()
+        .push_key_back(entry)
+        .unwrap();
+
+    build_block(func_data, entry, &func_def.block, &mut symtab)?;
 
     Ok(())
 }
 
-fn build_block(func: &mut FunctionData, block: &Block) -> Result<(), Error> {
-    let entry = func.dfg_mut().new_bb().basic_block(Some("%entry".into()));
-    func.layout_mut().bbs_mut().push_key_back(entry).unwrap();
-
-    let mut symtab = SymbolTable::new();
-
+fn build_block(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    block: &Block,
+    symtab: &mut SymbolTable,
+) -> Result<(), Error> {
+    symtab.push();
     for block_item in block.block_items.iter() {
-        build_block_item(func, entry, block_item, &mut symtab)?;
+        build_block_item(func, bb, block_item, symtab)?;
     }
-
-    Ok(())
+    symtab.pop()
 }
 
 fn build_block_item(
@@ -110,7 +123,7 @@ fn build_var_def(
 ) -> Result<(), Error> {
     let var = new_value!(func).alloc(Type::get_i32());
     func.dfg_mut()
-        .set_value_name(var, Some(format!("@{}", def.ident)));
+        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
     new_inst!(func, bb, var);
     if let Some(init_value) = &def.init_val {
         let value = build_init_value(func, bb, &init_value, symtab)?;
@@ -258,7 +271,7 @@ fn build_stmt(
     func: &mut FunctionData,
     bb: BasicBlock,
     stmt: &Stmt,
-    symtab: &SymbolTable,
+    symtab: &mut SymbolTable,
 ) -> Result<(), Error> {
     match stmt {
         Stmt::Assign(lval, exp) => {
@@ -270,6 +283,14 @@ fn build_stmt(
             let ret_val = build_exp(func, bb, exp, symtab)?;
             let ret = new_value!(func).ret(Some(ret_val));
             new_inst!(func, bb, ret);
+        }
+        Stmt::Exp(exp) => {
+            if let Some(exp) = exp {
+                build_exp(func, bb, exp, symtab)?;
+            }
+        }
+        Stmt::Block(block) => {
+            build_block(func, bb, block, symtab)?;
         }
     };
     Ok(())

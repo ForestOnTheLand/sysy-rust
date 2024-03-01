@@ -30,9 +30,15 @@ BlockItem: Box<BlockItem> = {
     Decl => Box::new(BlockItem::Decl( <> )),
     Stmt => Box::new(BlockItem::Stmt( <> )),
 }
-// Stmt ::= LVal "=" Exp ";" | "return" Exp ";";
+// Stmt ::= LVal "=" Exp ";"
+//        | [Exp] ";"
+//        | Block
+//        | "return" [Exp] ";";
 Stmt: Box<Stmt> = {
     <LVal> "=" <Exp> ";" => Box::new(Stmt::Assign( <> )),
+    <Exp> ";" => Box::new(Stmt::Exp(Some( <> ))),
+    ";" => Box::new(Stmt::Exp(None)),
+    <Block> => Box::new(Stmt::Block(Box::new( <> ))),
     "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )),
 }
 

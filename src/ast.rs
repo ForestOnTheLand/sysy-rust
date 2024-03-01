@@ -33,10 +33,15 @@ pub enum BlockItem {
     Stmt(Box<Stmt>),
 }
 
-/// `Stmt ::= LVal "=" Exp ";" | "return" Exp ";"`
+/// [`Stmt`] ::= [`LVal`] "=" [`Exp`] ";"
+///        | [`Exp`] ";"
+///        | [`Block`]
+///        | "return" [`Exp`] ";";
 #[derive(Debug)]
 pub enum Stmt {
     Assign(LVal, Box<Exp>),
+    Exp(Option<Box<Exp>>),
+    Block(Box<Block>),
     Return(Box<Exp>),
 }
 

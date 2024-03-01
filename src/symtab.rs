@@ -9,32 +9,46 @@ pub enum Symbol {
 }
 
 pub struct SymbolTable {
-    data: HashMap<String, Symbol>,
+    data: Vec<HashMap<String, Symbol>>,
 }
 
 impl SymbolTable {
     pub fn new() -> SymbolTable {
-        SymbolTable {
-            data: HashMap::new(),
-        }
+        SymbolTable { data: Vec::new() }
+    }
+
+    pub fn push(&mut self) {
+        self.data.push(HashMap::new());
+    }
+
+    pub fn pop(&mut self) -> Result<(), Error> {
+        self.data.pop().ok_or(Error::InternalError(
+            "symbol table gets empty before it should be".to_string(),
+        ))?;
+        Ok(())
     }
 
     pub fn get_const(&self, ident: &String) -> Result<i32, Error> {
-        match self.data.get(ident) {
-            Some(Symbol::Const(val)) => Ok(*val),
-            Some(Symbol::Var(_)) => Err(Error::ParseError(format!(
-                "expected '{}' to be a constant, but found an variable",
-                ident
-            ))),
-            None => Err(Error::ParseError(format!(
-                "identifier '{}' undefined",
-                ident
-            ))),
+        for layer in self.data.iter().rev() {
+            match layer.get(ident) {
+                Some(Symbol::Const(value)) => {
+                    return Ok(*value);
+                }
+                Some(Symbol::Var(_)) => {
+                    return Err(Error::ParseError(format!(
+                        "expected '{}' to be a constant, but found an variable",
+                        ident
+                    )));
+                }
+                None => {}
+            }
         }
+        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
     }
 
     pub fn insert_const(&mut self, ident: &String, value: i32) -> Result<(), Error> {
-        match self.data.insert(ident.clone(), Symbol::Const(value)) {
+        let data = self.data.last_mut().unwrap();
+        match data.insert(ident.clone(), Symbol::Const(value)) {
             Some(_previous) => Err(Error::ParseError(format!(
                 "identifier '{}' redefined",
                 ident
@@ -44,21 +58,26 @@ impl SymbolTable {
     }
 
     pub fn get_var(&self, ident: &String) -> Result<Value, Error> {
-        match self.data.get(ident) {
-            Some(Symbol::Const(_)) => Err(Error::ParseError(format!(
-                "expected '{}' to be an variable, but found a constant",
-                ident
-            ))),
-            Some(Symbol::Var(value)) => Ok(*value),
-            None => Err(Error::ParseError(format!(
-                "identifier '{}' undefined",
-                ident
-            ))),
+        for layer in self.data.iter().rev() {
+            match layer.get(ident) {
+                Some(Symbol::Const(_)) => {
+                    return Err(Error::ParseError(format!(
+                        "expected '{}' to be an variable, but found a constant",
+                        ident
+                    )));
+                }
+                Some(Symbol::Var(value)) => {
+                    return Ok(*value);
+                }
+                None => {}
+            }
         }
+        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
     }
 
     pub fn insert_var(&mut self, ident: &String, value: Value) -> Result<(), Error> {
-        match self.data.insert(ident.clone(), Symbol::Var(value)) {
+        let data = self.data.last_mut().unwrap();
+        match data.insert(ident.clone(), Symbol::Var(value)) {
             Some(_previous) => Err(Error::ParseError(format!(
                 "identifier '{}' redefined",
                 ident
@@ -68,13 +87,18 @@ impl SymbolTable {
     }
 
     pub fn get_symbol(&self, ident: &String) -> Result<Symbol, Error> {
-        if let Some(symbol) = self.data.get(ident) {
-            Ok(*symbol)
-        } else {
-            Err(Error::ParseError(format!(
-                "identifier '{}' undefined",
-                ident
-            )))
+        for layer in self.data.iter().rev() {
+            match layer.get(ident) {
+                Some(symbol) => {
+                    return Ok(*symbol);
+                }
+                None => {}
+            }
         }
+        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+    }
+
+    pub fn size(&self) -> usize {
+        self.data.len()
     }
 }
