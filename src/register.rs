@@ -1,16 +1,21 @@
-//! RISCV registers
+//! Allocation policy of RISCV assembly code.
+//! Temporary variables are allocated on either registers or stack.
+//! We will use a trivial policy: use at most 12 registers for variables,
+//! and if there are more variables, allocate them on stack.
 
 use crate::util::Error;
 use koopa::ir::Value;
 use std::collections::HashMap;
 use std::fmt;
 
-/// All 32 RISCV registers
+/// RISCV registers, with [`Register::id`] in 0~31 (32 in total)
 #[derive(Debug, Clone, Copy)]
 pub struct Register {
     pub id: u8,
 }
 
+/// names of registers, see https://pku-minic.github.io/online-doc/#/misc-app-ref/riscv-insts
+/// for more detailed information
 const REG_NAME: [&str; 32] = [
     "x0", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
     "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4", "t5",
@@ -40,9 +45,10 @@ impl fmt::Display for Register {
     }
 }
 
-/// temp registers that are allowed to be used
+/// temp registers that are allowed to use freely, namely t0~t6, a0~a7
 const TMP_REG: [u8; 15] = [5, 6, 7, 28, 29, 30, 31, 10, 11, 12, 13, 14, 15, 16, 17];
 
+/// Record the state of registers (occupied or not)
 pub struct RegisterTable {
     state: [bool; 32],
     available: i32,
@@ -89,11 +95,13 @@ impl RegisterTable {
     }
 }
 
+/// Record the position (register or stack) of a single variable.
 pub enum AllocPos {
     Reg(Register),
     Stack(i32),
 }
 
+/// Record the position (register or stack) of all variables in a function.
 pub struct AllocTable {
     data: HashMap<Value, AllocPos>,
 }

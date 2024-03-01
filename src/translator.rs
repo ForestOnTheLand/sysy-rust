@@ -1,6 +1,6 @@
 //! In this file, the conversion from Koopa to RISCV is provided.
 //! Instead of implementing a `trait` as is described in the writeup,
-//! the core of the file is implemented in the function `translate_program`.
+//! the core of the file is implemented in the function [`translate_program`].
 
 use crate::register::*;
 use crate::util::Error;

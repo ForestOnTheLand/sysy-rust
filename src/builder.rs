@@ -23,6 +23,7 @@ macro_rules! new_inst {
     };
 }
 
+/// Add a new value into a function.
 macro_rules! new_value {
     ($func:expr) => {
         $func.dfg_mut().new_value()

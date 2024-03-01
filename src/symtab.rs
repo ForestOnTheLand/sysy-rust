@@ -1,3 +1,5 @@
+//! Symbol table for KoopaIR.
+
 use crate::util::Error;
 use koopa::ir::Value;
 use std::collections::HashMap;
@@ -8,6 +10,7 @@ pub enum Symbol {
     Var(Value),
 }
 
+/// Symbol table, supporting nested blocks
 pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,
 }

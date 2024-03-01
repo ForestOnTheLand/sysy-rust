@@ -1,3 +1,7 @@
+//! Small tools, including
+//! - [`Error`] for all possible errors happening in this program
+//! - [`parse_args`] for parsing arguments
+
 use std::{env, fmt, fs, io};
 
 #[derive(Debug)]

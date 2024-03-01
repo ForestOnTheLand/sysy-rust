@@ -1,12 +1,17 @@
-//! In this file, different kinds of AST are defined.
+//! In this file, different kinds of AST are defined
+//! using BNF, with the following special notations:
+//!
+//! - {A} means repeating A 0 or more times
+//! - \[A\] means optional A
+//!
 
-/// `CompUnit ::= FuncDef`
+/// [`CompUnit`] `::=` [`FuncDef`]
 #[derive(Debug)]
 pub struct CompUnit {
     pub func_def: FuncDef,
 }
 
-/// `FuncDef ::= FuncType IDENT "(" ")" Block`
+/// [`FuncDef`] `::=` [`FuncType`] `IDENT` `"("` `")"` [`Block`]
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: FuncType,
@@ -14,29 +19,29 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-/// `FuncType ::= "int"`
+/// [`FuncType`] `::=` `"int"`
 #[derive(Debug)]
 pub enum FuncType {
     Int,
 }
 
-/// Block ::= "{" {BlockItem} "}";
+/// [`Block`] `::=` `"{"` {[`BlockItem`]} `"}"`
 #[derive(Debug)]
 pub struct Block {
     pub block_items: Vec<Box<BlockItem>>,
 }
 
-/// BlockItem ::= Decl | Stmt;
+/// [`BlockItem`] `::=` [`Decl`] | [`Stmt`]
 #[derive(Debug)]
 pub enum BlockItem {
     Decl(Box<Decl>),
     Stmt(Box<Stmt>),
 }
 
-/// [`Stmt`] ::= [`LVal`] "=" [`Exp`] ";"
-///        | [`Exp`] ";"
+/// [`Stmt`] `::=` [`LVal`] `"="` [`Exp`] `";"`
+///        | [`Exp`] `";"`
 ///        | [`Block`]
-///        | "return" [`Exp`] ";";
+///        | `"return"` [`Exp`] `";"`
 #[derive(Debug)]
 pub enum Stmt {
     Assign(LVal, Box<Exp>),
@@ -45,77 +50,77 @@ pub enum Stmt {
     Return(Box<Exp>),
 }
 
-/// Decl ::= ConstDecl | VarDecl;
+/// [`Decl`] `::=` [`ConstDecl`] | [`VarDecl`]
 #[derive(Debug)]
 pub enum Decl {
     Const(Box<ConstDecl>),
     Var(Box<VarDecl>),
 }
 
-/// VarDecl ::= BType VarDef {"," VarDef} ";";
+/// [`VarDecl`] `::=` [`BType`] [`VarDef`] {`","` [`VarDef`]} `""`
 #[derive(Debug)]
 pub struct VarDecl {
     pub btype: BType,
     pub var_defs: Vec<Box<VarDef>>,
 }
 
-/// VarDef ::= IDENT | IDENT "=" InitVal;
+/// [`VarDef`] `::=` `IDENT` | `IDENT` `"="` [`InitVal`]
 #[derive(Debug)]
 pub struct VarDef {
     pub ident: String,
     pub init_val: Option<Box<InitVal>>,
 }
-/// InitVal ::= Exp;
+/// [`InitVal`] `::=` [`Exp`]
 #[derive(Debug)]
 pub struct InitVal {
     pub exp: Box<Exp>,
 }
 
-/// ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
+/// [`ConstDecl`] `::=` `"const"` [`BType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
 #[derive(Debug)]
 pub struct ConstDecl {
     pub btype: BType,
     pub const_defs: Vec<Box<ConstDef>>,
 }
 
-/// BType ::= "int";
+/// [`BType`] `::=` `"int"`
 #[derive(Debug)]
 pub enum BType {
     Int,
 }
 
-/// ConstDef ::= IDENT "=" ConstInitVal;
+/// [`ConstDef`] `::=` `IDENT` `"="` [`ConstInitVal`]
 #[derive(Debug)]
 pub struct ConstDef {
     pub ident: String,
     pub const_init_val: Box<ConstInitVal>,
 }
 
-/// ConstInitVal ::= ConstExp;
+/// [`ConstInitVal`] `::=` [`ConstExp`]
 #[derive(Debug)]
 pub struct ConstInitVal {
     pub const_exp: Box<ConstExp>,
 }
 
-/// LVal ::= IDENT;
+/// [`LVal`] `::=` `IDENT`
 #[derive(Debug)]
 pub struct LVal {
     pub ident: String,
 }
 
-/// ConstExp ::= Exp;
+/// [`ConstExp`] `::=` [`Exp`]
 #[derive(Debug)]
 pub struct ConstExp {
     pub exp: Box<Exp>,
 }
 
-/// Exp ::= UnaryExp;
+/// [`Exp`] `::=` [`UnaryExp`]
 #[derive(Debug)]
 pub struct Exp {
     pub lor_exp: Box<LOrExp>,
 }
 
-/// PrimaryExp ::= "(" Exp ")" | LVal | Number;
+/// [`PrimaryExp`] `::=` `"("` [`Exp`] `")"` | [`LVal`] | `Number`
 #[derive(Debug)]
 pub enum PrimaryExp {
     Expression(Box<Exp>),
@@ -123,14 +128,14 @@ pub enum PrimaryExp {
     Number(i32),
 }
 
-/// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;
+/// [`UnaryExp`] `::=` [`PrimaryExp`] | [`UnaryOp`] [`UnaryExp`]
 #[derive(Debug)]
 pub enum UnaryExp {
     Single(Box<PrimaryExp>),
     Unary(UnaryOp, Box<UnaryExp>),
 }
 
-/// UnaryOp ::= "+" | "-" | "!";
+/// [`UnaryOp`] `::=` `"+"` | `"-"` | `"!"`
 #[derive(Debug)]
 pub enum UnaryOp {
     Pos,
@@ -138,7 +143,7 @@ pub enum UnaryOp {
     Not,
 }
 
-/// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
+/// [`MulExp`] `::=` [`UnaryExp`] | [`MulExp`] (`"*"` | `"/"` | `"%"`) [`UnaryExp`]
 #[derive(Debug)]
 pub enum MulExp {
     Single(Box<UnaryExp>),
@@ -152,7 +157,7 @@ pub enum MulOp {
     Mod,
 }
 
-/// AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
+/// [`AddExp`] `::=` [`MulExp`] | [`AddExp`] (`"+"` | `"-"`) [`MulExp`]
 #[derive(Debug)]
 pub enum AddExp {
     Single(Box<MulExp>),
@@ -165,7 +170,7 @@ pub enum AddOp {
     Sub,
 }
 
-/// RelExp ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
+/// [`RelExp`] `::=` [`AddExp`] | [`RelExp`] (`"<"` | `">"` | `"<="` | `">="`) [`AddExp`]
 #[derive(Debug)]
 pub enum RelExp {
     Single(Box<AddExp>),
@@ -180,7 +185,7 @@ pub enum RelOp {
     Ge,
 }
 
-/// EqExp ::= RelExp | EqExp ("==" | "!=") RelExp;
+/// [`EqExp`] `::=` [`RelExp`] | [`EqExp`] (`"=="` | `"!="`) [`RelExp`]
 #[derive(Debug)]
 pub enum EqExp {
     Single(Box<RelExp>),
@@ -193,14 +198,14 @@ pub enum EqOp {
     Neq,
 }
 
-/// LAndExp ::= EqExp | LAndExp "&&" EqExp;
+/// [`LAndExp`] `::=` [`EqExp`] | [`LAndExp`] `"&&"` [`EqExp`]
 #[derive(Debug)]
 pub enum LAndExp {
     Single(Box<EqExp>),
     Binary(Box<LAndExp>, Box<EqExp>),
 }
 
-/// LOrExp ::= LAndExp | LOrExp "||" LAndExp;
+/// [`LOrExp`] `::=` [`LAndExp`] | [`LOrExp`] `"||"` [`LAndExp`]
 #[derive(Debug)]
 pub enum LOrExp {
     Single(Box<LAndExp>),
