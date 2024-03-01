@@ -41,12 +41,14 @@ pub enum BlockItem {
 /// [`Stmt`] `::=` [`LVal`] `"="` [`Exp`] `";"`
 ///        | [`Exp`] `";"`
 ///        | [`Block`]
+///        | `"if"` `"("` [`Exp`] `")"` [`Stmt`] [`"else"` [`Stmt`]]
 ///        | `"return"` [`Exp`] `";"`
 #[derive(Debug)]
 pub enum Stmt {
     Assign(LVal, Box<Exp>),
     Exp(Option<Box<Exp>>),
     Block(Box<Block>),
+    Condition(Box<Exp>, Box<Stmt>, Option<Box<Stmt>>),
     Return(Box<Exp>),
 }
 

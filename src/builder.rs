@@ -7,19 +7,25 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
 
-// use std::error::Error;
+use std::collections::HashSet;
 use std::io;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+// Global counter for if-else statements
+static CONDITION_COUNTER: AtomicUsize = AtomicUsize::new(1);
+static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 /// Add an instruction into a function.
-/// To avoid a huge amount of meaningless repeated code, I have to use macros.
 macro_rules! new_inst {
     ($func:expr, $bb:expr, $inst:expr) => {
-        $func
-            .layout_mut()
-            .bb_mut($bb)
-            .insts_mut()
-            .push_key_back($inst)
-            .unwrap()
+        if $func.layout().bbs().contains_key(&$bb) {
+            $func
+                .layout_mut()
+                .bb_mut($bb)
+                .insts_mut()
+                .push_key_back($inst)
+                .unwrap()
+        }
     };
 }
 
@@ -27,6 +33,23 @@ macro_rules! new_inst {
 macro_rules! new_value {
     ($func:expr) => {
         $func.dfg_mut().new_value()
+    };
+}
+
+/// Add a new basic block into a function.
+macro_rules! new_bb {
+    ($func:expr) => {
+        $func.dfg_mut().new_bb()
+    };
+}
+
+macro_rules! add_bb {
+    ($func_data:expr, $entry:expr) => {
+        $func_data
+            .layout_mut()
+            .bbs_mut()
+            .push_key_back($entry)
+            .unwrap();
     };
 }
 
@@ -52,19 +75,35 @@ fn build_function(program: &mut Program, func_def: &FuncDef) -> Result<(), Error
     let mut symtab = SymbolTable::new();
 
     let func_data = program.func_mut(func);
-    let entry = func_data
-        .dfg_mut()
-        .new_bb()
-        .basic_block(Some("%entry".into()));
-    func_data
-        .layout_mut()
-        .bbs_mut()
-        .push_key_back(entry)
-        .unwrap();
+    let bb = new_bb!(func_data).basic_block(Some("%entry".into()));
+    add_bb!(func_data, bb);
 
-    build_block(func_data, entry, &func_def.block, &mut symtab)?;
+    build_block(func_data, bb, &func_def.block, &mut symtab)?;
+
+    // remove_unused(func_data);
 
     Ok(())
+}
+
+fn remove_unused(func_data: &mut FunctionData) {
+    let mut unused_bb = HashSet::new();
+    let mut unused_value = HashSet::new();
+    for (&bb, node) in func_data.layout().bbs() {
+        if let Some(name) = func_data.dfg().bb(bb).name() {
+            if name.starts_with("%unused") {
+                unused_bb.insert(bb);
+                for &inst in node.insts().keys() {
+                    unused_value.insert(inst);
+                }
+            }
+        }
+    }
+    for bb in unused_bb {
+        func_data.dfg_mut().remove_bb(bb);
+    }
+    for value in unused_value {
+        func_data.dfg_mut().remove_value(value);
+    }
 }
 
 fn build_block(
@@ -72,12 +111,14 @@ fn build_block(
     bb: BasicBlock,
     block: &Block,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
     symtab.push();
+    let mut next_bb = bb;
     for block_item in block.block_items.iter() {
-        build_block_item(func, bb, block_item, symtab)?;
+        next_bb = build_block_item(func, next_bb, block_item, symtab)?;
     }
-    symtab.pop()
+    symtab.pop()?;
+    Ok(next_bb)
 }
 
 fn build_block_item(
@@ -85,9 +126,12 @@ fn build_block_item(
     bb: BasicBlock,
     item: &BlockItem,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
     match item {
-        BlockItem::Decl(decl) => build_decl(func, bb, &decl, symtab),
+        BlockItem::Decl(decl) => {
+            build_decl(func, bb, &decl, symtab)?;
+            Ok(bb)
+        }
         BlockItem::Stmt(stmt) => build_stmt(func, bb, &stmt, symtab),
     }
 }
@@ -99,9 +143,10 @@ fn build_decl(
     symtab: &mut SymbolTable,
 ) -> Result<(), Error> {
     match decl {
-        Decl::Const(decl) => build_const_decl(decl, symtab),
-        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab),
-    }
+        Decl::Const(decl) => build_const_decl(decl, symtab)?,
+        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab)?,
+    };
+    Ok(())
 }
 
 fn build_var_decl(
@@ -273,28 +318,63 @@ fn build_stmt(
     bb: BasicBlock,
     stmt: &Stmt,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
     match stmt {
         Stmt::Assign(lval, exp) => {
             let value = build_exp(func, bb, exp, symtab)?;
             let store = new_value!(func).store(value, symtab.get_var(&lval.ident)?);
             new_inst!(func, bb, store);
+            Ok(bb)
         }
         Stmt::Return(exp) => {
             let ret_val = build_exp(func, bb, exp, symtab)?;
             let ret = new_value!(func).ret(Some(ret_val));
             new_inst!(func, bb, ret);
+            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
+            // add_bb!(func, end_bb);
+            Ok(end_bb)
         }
         Stmt::Exp(exp) => {
             if let Some(exp) = exp {
                 build_exp(func, bb, exp, symtab)?;
             }
+            Ok(bb)
         }
         Stmt::Block(block) => {
-            build_block(func, bb, block, symtab)?;
+            let next_bb = build_block(func, bb, block, symtab)?;
+            Ok(next_bb)
         }
-    };
-    Ok(())
+        Stmt::Condition(cond, true_branch, false_branch) => {
+            let id = CONDITION_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let cond = build_exp(func, bb, cond, symtab)?;
+            let end_bb = new_bb!(func).basic_block(Some(format!("%endif_{id}")));
+
+            let true_bb = new_bb!(func).basic_block(Some(format!("%then_{id}")));
+            add_bb!(func, true_bb);
+            let true_end = build_stmt(func, true_bb, true_branch, symtab)?;
+            let true_jmp = new_value!(func).jump(end_bb);
+            new_inst!(func, true_end, true_jmp);
+
+            let else_bb = {
+                if let Some(false_branch) = false_branch {
+                    let false_bb = new_bb!(func).basic_block(Some(format!("%else_{id}")));
+                    add_bb!(func, false_bb);
+                    let false_end = build_stmt(func, false_bb, false_branch, symtab)?;
+                    add_bb!(func, end_bb);
+                    let false_jmp = new_value!(func).jump(end_bb);
+                    new_inst!(func, false_end, false_jmp);
+                    false_bb
+                } else {
+                    add_bb!(func, end_bb);
+                    end_bb
+                }
+            };
+            let branch = new_value!(func).branch(cond, true_bb, else_bb);
+            new_inst!(func, bb, branch);
+            Ok(end_bb)
+        }
+    }
 }
 
 fn build_exp(

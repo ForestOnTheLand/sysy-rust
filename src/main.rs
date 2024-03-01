@@ -14,6 +14,8 @@ mod translator;
 /// Util functions
 mod util;
 
+use std::io::stdout;
+
 use lalrpop_util::lalrpop_mod;
 
 lalrpop_mod!(sysy);
@@ -26,7 +28,6 @@ fn run() -> Result<(), util::Error> {
 
     match mode {
         util::Mode::Koopa => {
-            println!("{:#?}", ast);
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {

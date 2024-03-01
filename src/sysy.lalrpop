@@ -25,21 +25,34 @@ FuncType: FuncType = "int" => FuncType::Int;
 
 // Block ::= "{" {BlockItem} "}";
 Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
+
 // BlockItem ::= Decl | Stmt;
 BlockItem: Box<BlockItem> = {
     Decl => Box::new(BlockItem::Decl( <> )),
     Stmt => Box::new(BlockItem::Stmt( <> )),
 }
+
 // Stmt ::= LVal "=" Exp ";"
 //        | [Exp] ";"
 //        | Block
+//        | "if" "(" Exp ")" Stmt ["else" Stmt]
 //        | "return" [Exp] ";";
 Stmt: Box<Stmt> = {
+    MatchedStmt => <>,
+    OpenStmt => <>,
+}
+
+MatchedStmt: Box<Stmt> = {
     <LVal> "=" <Exp> ";" => Box::new(Stmt::Assign( <> )),
-    <Exp> ";" => Box::new(Stmt::Exp(Some( <> ))),
-    ";" => Box::new(Stmt::Exp(None)),
+    <Exp?> ";" => Box::new(Stmt::Exp( <> )),
+    "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: MatchedStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
     <Block> => Box::new(Stmt::Block(Box::new( <> ))),
-    "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )),
+    "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )), 
+}
+
+OpenStmt: Box<Stmt> = {
+    "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: OpenStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
+    "if" "(" <exp: Exp> ")" <s1: Stmt> => Box::new(Stmt::Condition(exp, s1, None)),
 }
 
 // Decl ::= ConstDecl | VarDecl;
