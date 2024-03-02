@@ -7,6 +7,7 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
 
+use std::collections::HashSet;
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -19,14 +20,14 @@ static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
 /// Add an instruction into a function.
 macro_rules! new_inst {
     ($func:expr, $bb:expr, $inst:expr) => {
-        if $func.layout().bbs().contains_key(&$bb) {
-            $func
-                .layout_mut()
-                .bb_mut($bb)
-                .insts_mut()
-                .push_key_back($inst)
-                .unwrap()
-        }
+        // if $func.layout().bbs().contains_key(&$bb) {
+        $func
+            .layout_mut()
+            .bb_mut($bb)
+            .insts_mut()
+            .push_key_back($inst)
+            .unwrap()
+        // }
     };
 }
 
@@ -54,6 +55,18 @@ macro_rules! add_bb {
     };
 }
 
+fn block_tag(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
+    let name = func.dfg().bb(bb).name().as_ref();
+    let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
+    let name = name
+        .strip_prefix("%")
+        .ok_or(Error::InternalError(format!(
+            "invalid function name '{name}'  generated in koopa, expected to begin with '%'"
+        )))?
+        .to_string();
+    Ok(name)
+}
+
 pub fn output_program(program: &Program, output: impl io::Write) {
     KoopaGenerator::new(output).generate_on(program).unwrap();
 }
@@ -79,7 +92,9 @@ fn build_function(program: &mut Program, func_def: &FuncDef) -> Result<(), Error
     let bb = new_bb!(func_data).basic_block(Some("%entry".into()));
     add_bb!(func_data, bb);
 
-    build_block(func_data, bb, &func_def.block, &mut symtab)?;
+    let bb = build_block(func_data, bb, &func_def.block, &mut symtab)?;
+    let ret = new_value!(func_data).ret(None);
+    new_inst!(func_data, bb, ret);
 
     Ok(())
 }
@@ -312,7 +327,7 @@ fn build_stmt(
             new_inst!(func, bb, ret);
             let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
             let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
-            // add_bb!(func, end_bb);
+            add_bb!(func, end_bb);
             Ok(end_bb)
         }
         Stmt::Exp(exp) => {
