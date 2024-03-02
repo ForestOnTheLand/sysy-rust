@@ -23,7 +23,7 @@ fn main() {
     let (mode, input, mut output) = util::parse_args().unwrap();
 
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
-    let program = builder::build_program(&ast).unwrap();
+    let program = builder::build_program(&ast);
 
     match mode {
         util::Mode::Koopa => {
