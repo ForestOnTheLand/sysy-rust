@@ -19,30 +19,30 @@ fn block_tag(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
     Ok(name)
 }
 
-pub fn translate_program(program: &Program, output: &mut impl io::Write) -> Result<(), Error> {
+pub fn translate_program(program: &Program, output: &mut impl io::Write) {
     // Functions
-    writeln!(output, "  .text").map_err(Error::IOError)?;
+    writeln!(output, "  .text").unwrap();
     for &func in program.func_layout() {
         let func_data = program.func(func);
-        translate_function(func_data, output)?;
+        translate_function(func_data, output);
     }
-    Ok(())
 }
 
-fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> Result<(), Error> {
+fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) {
     let func_name = func_data
         .name()
         .strip_prefix("@")
         .ok_or(Error::InternalError(format!(
             "invalid function name '{}' generated in koopa, expected to begin with '@'",
             func_data.name()
-        )))?;
-    writeln!(output, "  .global {}\n{}:", func_name, func_name).map_err(Error::IOError)?;
+        )))
+        .unwrap();
+    writeln!(output, "  .global {}\n{}:", func_name, func_name).unwrap();
 
     let stack_size = get_stack_size(func_data);
 
     if stack_size > 0 {
-        writeln!(output, "  addi sp, sp, -{}", stack_size).map_err(Error::IOError)?;
+        writeln!(output, "  addi sp, sp, -{}", stack_size).unwrap();
     }
 
     let mut config = TranslateConfig {
@@ -54,18 +54,16 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
     };
 
     for (&bb, node) in func_data.layout().bbs() {
-        let name = block_tag(func_data, bb)?;
+        let name = block_tag(func_data, bb).unwrap();
         if name != "entry" {
-            println!("{name}");
-            writeln!(output, "{name}:").map_err(Error::IOError)?;
+            writeln!(output, "{name}:").map_err(Error::IOError).unwrap();
         }
         for &inst in node.insts().keys() {
             let on_stack = !func_data.dfg().value(inst).ty().is_unit() && config.table.remain() < 3;
-            translate_instruction(inst, output, &mut config, on_stack)?;
-            writeln!(output, "").map_err(Error::IOError)?;
+            translate_instruction(inst, output, &mut config, on_stack);
+            writeln!(output, "").map_err(Error::IOError).unwrap();
         }
     }
-    Ok(())
 }
 
 fn get_stack_size(func_data: &FunctionData) -> i32 {
@@ -97,7 +95,7 @@ fn translate_instruction(
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
     on_stack: bool,
-) -> Result<(), Error> {
+) {
     // If value is already handled before, just return it directly.
     // Note that we need to load variables on stack into register.
     writeln!(
@@ -105,39 +103,39 @@ fn translate_instruction(
         "  # {:?}",
         config.func_data.dfg().value(value).kind()
     )
-    .map_err(Error::IOError)?;
+    .unwrap();
     // Where the result is stored
     let reg = match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(int) => {
             let reg = config.table.get_vaccant().unwrap();
-            writeln!(output, "  li {}, {}", reg, int.value()).map_err(Error::IOError)?;
+            writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
             Some(reg)
         }
 
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
-                    let reg = translate_value(val, output, config)?;
+                    let reg = translate_value(val, output, config);
                     if reg.id != 10 {
-                        writeln!(output, "  mv a0, {}", reg).map_err(Error::IOError)?;
+                        writeln!(output, "  mv a0, {}", reg).unwrap();
                     }
                 }
                 None => {}
             };
             if config.stack_size > 0 {
-                writeln!(output, "  addi sp, sp, {}", config.stack_size).map_err(Error::IOError)?;
+                writeln!(output, "  addi sp, sp, {}", config.stack_size).unwrap();
             }
-            writeln!(output, "  ret").map_err(Error::IOError)?;
+            writeln!(output, "  ret").unwrap();
             None
         }
 
         ValueKind::Binary(bin) => {
-            let left = translate_value(bin.lhs(), output, config).unwrap();
-            let right = translate_value(bin.rhs(), output, config).unwrap();
+            let left = translate_value(bin.lhs(), output, config);
+            let right = translate_value(bin.rhs(), output, config);
             println!("{left}, {right}");
             config.table.reset(left).unwrap();
             config.table.reset(right).unwrap();
-            let res = config.table.get_vaccant()?;
+            let res = config.table.get_vaccant().unwrap();
 
             match bin.op() {
                 BinaryOp::Add => writeln!(output, "  add {res}, {left}, {right}"),
@@ -159,48 +157,48 @@ fn translate_instruction(
                 }
                 _ => unimplemented!(),
             }
-            .map_err(Error::IOError)?;
+            .unwrap();
 
             Some(res)
         }
 
         ValueKind::Alloc(_alloc) => {
-            config.symbol.store_stack(value, *config.stack_pos)?;
-            writeln!(output, "  # alloc at {}(sp)", config.stack_pos).map_err(Error::IOError)?;
+            config.symbol.store_stack(value, *config.stack_pos).unwrap();
+            writeln!(output, "  # alloc at {}(sp)", config.stack_pos).unwrap();
             *config.stack_pos += 4;
-            return Ok(());
+            return;
         }
 
         ValueKind::Store(store) => {
-            let reg = translate_value(store.value(), output, config)?;
+            let reg = translate_value(store.value(), output, config);
             let pos = config.symbol.get_stack(&store.dest()).unwrap();
-            writeln!(output, "  sw {reg}, {pos}(sp)").map_err(Error::IOError)?;
-            config.table.reset(reg)?;
+            writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+            config.table.reset(reg).unwrap();
 
             None
         }
 
         ValueKind::Load(load) => {
-            let reg = config.table.get_vaccant()?;
+            let reg = config.table.get_vaccant().unwrap();
             let pos = config.symbol.get_stack(&load.src()).unwrap();
-            writeln!(output, "  lw {reg}, {pos}(sp)").map_err(Error::IOError)?;
+            writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
 
             Some(reg)
         }
 
         ValueKind::Branch(branch) => {
-            let cond = translate_value(branch.cond(), output, config)?;
-            let then_tag = block_tag(config.func_data, branch.true_bb())?;
-            let else_tag = block_tag(config.func_data, branch.false_bb())?;
-            writeln!(output, "  bnez {cond}, {then_tag}").map_err(Error::IOError)?;
-            config.table.reset(cond)?;
-            writeln!(output, "  j {else_tag}").map_err(Error::IOError)?;
+            let cond = translate_value(branch.cond(), output, config);
+            let then_tag = block_tag(config.func_data, branch.true_bb()).unwrap();
+            let else_tag = block_tag(config.func_data, branch.false_bb()).unwrap();
+            writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
+            config.table.reset(cond).unwrap();
+            writeln!(output, "  j {else_tag}").unwrap();
             None
         }
 
         ValueKind::Jump(jump) => {
-            let jmp_tag = block_tag(config.func_data, jump.target())?;
-            writeln!(output, "  j {jmp_tag}").map_err(Error::IOError)?;
+            let jmp_tag = block_tag(config.func_data, jump.target()).unwrap();
+            writeln!(output, "  j {jmp_tag}").unwrap();
             None
         }
 
@@ -208,44 +206,43 @@ fn translate_instruction(
     };
 
     if config.func_data.dfg().value(value).ty().is_unit() {
-        writeln!(output, "  # void type").map_err(Error::IOError)?;
-        return Ok(());
-    }
-
-    let reg = reg.ok_or(Error::InternalError(format!(
-        "{:#?} is non-void type",
-        config.func_data.dfg().value(value)
-    )))?;
-
-    if on_stack {
-        config.symbol.store_stack(value, *config.stack_pos)?;
-        config.table.reset(reg)?;
-        writeln!(output, "  sw {}, {}(sp)", reg, config.stack_pos).map_err(Error::IOError)?;
-        writeln!(output, "  # alloc at {}(sp)", config.stack_pos).map_err(Error::IOError)?;
-        *config.stack_pos += 4;
+        writeln!(output, "  # void type").unwrap();
     } else {
-        writeln!(output, "  # alloc at {}", reg).map_err(Error::IOError)?;
-        config.symbol.store_register(value, reg)?;
-    }
+        let reg = reg
+            .ok_or(Error::InternalError(format!(
+                "{:#?} is non-void type",
+                config.func_data.dfg().value(value)
+            )))
+            .unwrap();
 
-    Ok(())
+        if on_stack {
+            config.symbol.store_stack(value, *config.stack_pos).unwrap();
+            config.table.reset(reg).unwrap();
+            writeln!(output, "  sw {}, {}(sp)", reg, config.stack_pos).unwrap();
+            writeln!(output, "  # alloc at {}(sp)", config.stack_pos).unwrap();
+            *config.stack_pos += 4;
+        } else {
+            writeln!(output, "  # alloc at {}", reg).unwrap();
+            config.symbol.store_register(value, reg).unwrap();
+        }
+    }
 }
 
 fn translate_value(
     value: Value,
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
-) -> Result<Register, Error> {
+) -> Register {
     writeln!(output, "  # Translate Value").unwrap();
     match config.symbol.get(&value) {
-        Some(AllocPos::Reg(reg)) => Ok(*reg),
+        Some(AllocPos::Reg(reg)) => *reg,
         Some(AllocPos::Stack(offset)) => {
-            let reg = config.table.get_vaccant()?;
-            writeln!(output, "  lw {reg}, {offset}(sp)").map_err(Error::IOError)?;
-            Ok(reg)
+            let reg = config.table.get_vaccant().unwrap();
+            writeln!(output, "  lw {reg}, {offset}(sp)").unwrap();
+            reg
         }
         None => {
-            translate_instruction(value, output, config, false)?;
+            translate_instruction(value, output, config, false);
             translate_value(value, output, config)
         }
     }

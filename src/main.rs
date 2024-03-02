@@ -18,26 +18,19 @@ use lalrpop_util::lalrpop_mod;
 
 lalrpop_mod!(sysy);
 
-fn run() -> Result<(), util::Error> {
-    let (mode, input, mut output) = util::parse_args()?;
+/// Usage: `<program> <mode> <input> -o <output_file>`
+fn main() {
+    let (mode, input, mut output) = util::parse_args().unwrap();
 
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
-    let program = builder::build_program(&ast)?;
+    let program = builder::build_program(&ast).unwrap();
 
     match mode {
         util::Mode::Koopa => {
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {
-            translator::translate_program(&program, &mut output)?;
-            // translator::translate_program(&program, &mut std::io::stdout())?;
+            translator::translate_program(&program, &mut output);
         }
     }
-
-    Ok(())
-}
-
-/// Usage: `<program> <mode> <input> -o <output_file>`
-fn main() {
-    run().unwrap();
 }
