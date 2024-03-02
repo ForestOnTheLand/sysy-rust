@@ -18,12 +18,14 @@ static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
 /// Add an instruction into a function.
 macro_rules! new_inst {
     ($func:expr, $bb:expr, $inst:expr) => {
-        $func
-            .layout_mut()
-            .bb_mut($bb)
-            .insts_mut()
-            .push_key_back($inst)
-            .unwrap()
+        if !is_unused_block($func, $bb) {
+            $func
+                .layout_mut()
+                .bb_mut($bb)
+                .insts_mut()
+                .push_key_back($inst)
+                .unwrap()
+        }
     };
 }
 
@@ -47,7 +49,7 @@ macro_rules! add_bb {
             .layout_mut()
             .bbs_mut()
             .push_key_back($entry)
-            .unwrap();
+            .unwrap()
     };
 }
 
@@ -76,9 +78,16 @@ fn build_function(program: &mut Program, func_def: &FuncDef) {
     let bb = new_bb!(func_data).basic_block(Some("%entry".into()));
     add_bb!(func_data, bb);
 
-    let bb = build_block(func_data, bb, &func_def.block, &mut symtab);
-    let ret = new_value!(func_data).ret(None);
-    new_inst!(func_data, bb, ret);
+    build_block(func_data, bb, &func_def.block, &mut symtab);
+}
+
+fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
+    func.dfg()
+        .bb(bb)
+        .name()
+        .as_ref()
+        .expect("basic blocks should have a non-default name")
+        .starts_with("%unused")
 }
 
 fn build_block(
@@ -142,6 +151,9 @@ fn build_var_def(
     def: &VarDef,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
+    if is_unused_block(func, bb) {
+        return bb;
+    }
     let var = new_value!(func).alloc(Type::get_i32());
     func.dfg_mut()
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
@@ -296,6 +308,10 @@ fn build_stmt(
     stmt: &Stmt,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
+    if is_unused_block(func, bb) {
+        return bb;
+    }
+
     match stmt {
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
@@ -309,7 +325,7 @@ fn build_stmt(
             new_inst!(func, bb, ret);
             let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
             let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
-            add_bb!(func, end_bb);
+            // add_bb!(func, end_bb);
             end_bb
         }
         Stmt::Exp(exp) => {

@@ -55,7 +55,7 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) {
 
     for (&bb, node) in func_data.layout().bbs() {
         let name = block_tag(func_data, bb).unwrap();
-        if name != "entry" {
+        if !name.starts_with("entry") {
             writeln!(output, "{name}:").map_err(Error::IOError).unwrap();
         }
         for &inst in node.insts().keys() {
@@ -107,9 +107,13 @@ fn translate_instruction(
     // Where the result is stored
     let reg = match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(int) => {
-            let reg = config.table.get_vaccant().unwrap();
-            writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
-            Some(reg)
+            if int.value() != 0 {
+                let reg = config.table.get_vaccant().unwrap();
+                writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
+                Some(reg)
+            } else {
+                Some(Register::new(0).unwrap())
+            }
         }
 
         ValueKind::Return(ret) => {

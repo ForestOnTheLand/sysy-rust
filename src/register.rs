@@ -14,7 +14,7 @@ pub struct Register {
     pub id: u8,
 }
 
-/// names of registers, see https://pku-minic.github.io/online-doc/#/misc-app-ref/riscv-insts
+/// names of registers, see <https://pku-minic.github.io/online-doc/#/misc-app-ref/riscv-insts>
 /// for more detailed information
 const REG_NAME: [&str; 32] = [
     "x0", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
