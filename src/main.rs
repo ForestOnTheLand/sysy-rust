@@ -30,6 +30,7 @@ fn run() -> Result<(), util::Error> {
         }
         util::Mode::RiscV => {
             translator::translate_program(&program, &mut output)?;
+            // translator::translate_program(&program, &mut std::io::stdout())?;
         }
     }
 
@@ -38,13 +39,5 @@ fn run() -> Result<(), util::Error> {
 
 /// Usage: `<program> <mode> <input> -o <output_file>`
 fn main() {
-    match run() {
-        Ok(_) => {
-            println!("Program Exited Successfully!");
-        }
-        Err(err) => {
-            println!("An Error Occurred!");
-            println!("{}", err);
-        }
-    }
+    run().unwrap();
 }

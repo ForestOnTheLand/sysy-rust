@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Global counter for if-else statements
 static CONDITION_COUNTER: AtomicUsize = AtomicUsize::new(1);
+static AND_COUNTER: AtomicUsize = AtomicUsize::new(1);
+static OR_COUNTER: AtomicUsize = AtomicUsize::new(1);
 static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 /// Add an instruction into a function.
@@ -104,10 +106,7 @@ fn build_block_item(
     symtab: &mut SymbolTable,
 ) -> Result<BasicBlock, Error> {
     match item {
-        BlockItem::Decl(decl) => {
-            build_decl(func, bb, &decl, symtab)?;
-            Ok(bb)
-        }
+        BlockItem::Decl(decl) => build_decl(func, bb, &decl, symtab),
         BlockItem::Stmt(stmt) => build_stmt(func, bb, &stmt, symtab),
     }
 }
@@ -117,12 +116,14 @@ fn build_decl(
     bb: BasicBlock,
     decl: &Decl,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
     match decl {
-        Decl::Const(decl) => build_const_decl(decl, symtab)?,
-        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab)?,
-    };
-    Ok(())
+        Decl::Const(decl) => {
+            build_const_decl(decl, symtab)?;
+            Ok(bb)
+        }
+        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab),
+    }
 }
 
 fn build_var_decl(
@@ -130,11 +131,12 @@ fn build_var_decl(
     bb: BasicBlock,
     decl: &VarDecl,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
+    let mut bb = bb;
     for def in decl.var_defs.iter() {
-        build_var_def(func, bb, def, symtab)?;
+        bb = build_var_def(func, bb, def, symtab)?;
     }
-    Ok(())
+    Ok(bb)
 }
 
 fn build_var_def(
@@ -142,18 +144,20 @@ fn build_var_def(
     bb: BasicBlock,
     def: &VarDef,
     symtab: &mut SymbolTable,
-) -> Result<(), Error> {
+) -> Result<BasicBlock, Error> {
     let var = new_value!(func).alloc(Type::get_i32());
     func.dfg_mut()
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
     new_inst!(func, bb, var);
+    symtab.insert_var(&def.ident, var)?;
     if let Some(init_value) = &def.init_val {
-        let value = build_init_value(func, bb, &init_value, symtab)?;
+        let (value, bb) = build_init_value(func, bb, &init_value, symtab)?;
         let store = new_value!(func).store(value, var);
         new_inst!(func, bb, store);
+        Ok(bb)
+    } else {
+        Ok(bb)
     }
-    symtab.insert_var(&def.ident, var)?;
-    Ok(())
 }
 
 fn build_init_value(
@@ -161,7 +165,7 @@ fn build_init_value(
     bb: BasicBlock,
     val: &InitVal,
     symtab: &mut SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     build_exp(func, bb, &val.exp, symtab)
 }
 
@@ -297,13 +301,13 @@ fn build_stmt(
 ) -> Result<BasicBlock, Error> {
     match stmt {
         Stmt::Assign(lval, exp) => {
-            let value = build_exp(func, bb, exp, symtab)?;
+            let (value, bb) = build_exp(func, bb, exp, symtab)?;
             let store = new_value!(func).store(value, symtab.get_var(&lval.ident)?);
             new_inst!(func, bb, store);
             Ok(bb)
         }
         Stmt::Return(exp) => {
-            let ret_val = build_exp(func, bb, exp, symtab)?;
+            let (ret_val, bb) = build_exp(func, bb, exp, symtab)?;
             let ret = new_value!(func).ret(Some(ret_val));
             new_inst!(func, bb, ret);
             let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -323,7 +327,7 @@ fn build_stmt(
         }
         Stmt::Condition(cond, true_branch, false_branch) => {
             let id = CONDITION_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let cond = build_exp(func, bb, cond, symtab)?;
+            let (cond, bb) = build_exp(func, bb, cond, symtab)?;
             let end_bb = new_bb!(func).basic_block(Some(format!("%endif_{id}")));
 
             let true_bb = new_bb!(func).basic_block(Some(format!("%then_{id}")));
@@ -358,7 +362,7 @@ fn build_exp(
     bb: BasicBlock,
     exp: &Exp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     build_lor_exp(func, bb, &exp.lor_exp, symtab)
 }
 
@@ -367,24 +371,24 @@ fn build_unary_exp(
     bb: BasicBlock,
     exp: &UnaryExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         UnaryExp::Single(exp) => build_primary_exp(func, bb, exp, symtab),
         UnaryExp::Unary(unary_op, exp) => {
-            let value = build_unary_exp(func, bb, exp, symtab)?;
+            let (value, bb) = build_unary_exp(func, bb, exp, symtab)?;
             match unary_op {
-                UnaryOp::Pos => Ok(value),
+                UnaryOp::Pos => Ok((value, bb)),
                 UnaryOp::Neg => {
                     let zero = new_value!(func).integer(0);
                     let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
                     new_inst!(func, bb, neg);
-                    Ok(neg)
+                    Ok((neg, bb))
                 }
                 UnaryOp::Not => {
                     let zero = new_value!(func).integer(0);
                     let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
                     new_inst!(func, bb, not);
-                    Ok(not)
+                    Ok((not, bb))
                 }
             }
         }
@@ -396,16 +400,16 @@ fn build_primary_exp(
     bb: BasicBlock,
     exp: &PrimaryExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
-        PrimaryExp::Number(num) => Ok(new_value!(func).integer(*num)),
+        PrimaryExp::Number(num) => Ok((new_value!(func).integer(*num), bb)),
         PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident)? {
-            Symbol::Const(val) => Ok(new_value!(func).integer(val)),
+            Symbol::Const(val) => Ok((new_value!(func).integer(val), bb)),
             Symbol::Var(value) => {
                 let temp = new_value!(func).load(value);
                 new_inst!(func, bb, temp);
-                Ok(temp)
+                Ok((temp, bb))
             }
         },
     }
@@ -416,12 +420,12 @@ fn build_mul_exp(
     bb: BasicBlock,
     exp: &MulExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         MulExp::Single(exp) => build_unary_exp(func, bb, exp, symtab),
         MulExp::Binary(left, op, right) => {
-            let left = build_mul_exp(func, bb, left, symtab)?;
-            let right = build_unary_exp(func, bb, right, symtab)?;
+            let (left, bb) = build_mul_exp(func, bb, left, symtab)?;
+            let (right, bb) = build_unary_exp(func, bb, right, symtab)?;
             let value = new_value!(func).binary(
                 match op {
                     MulOp::Mul => BinaryOp::Mul,
@@ -432,7 +436,7 @@ fn build_mul_exp(
                 right,
             );
             new_inst!(func, bb, value);
-            Ok(value)
+            Ok((value, bb))
         }
     }
 }
@@ -442,12 +446,12 @@ fn build_add_exp(
     bb: BasicBlock,
     exp: &AddExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         AddExp::Single(exp) => build_mul_exp(func, bb, exp, symtab),
         AddExp::Binary(left, op, right) => {
-            let left = build_add_exp(func, bb, left, symtab)?;
-            let right = build_mul_exp(func, bb, right, symtab)?;
+            let (left, bb) = build_add_exp(func, bb, left, symtab)?;
+            let (right, bb) = build_mul_exp(func, bb, right, symtab)?;
             let value = new_value!(func).binary(
                 match op {
                     AddOp::Add => BinaryOp::Add,
@@ -457,7 +461,7 @@ fn build_add_exp(
                 right,
             );
             new_inst!(func, bb, value);
-            Ok(value)
+            Ok((value, bb))
         }
     }
 }
@@ -467,12 +471,12 @@ fn build_rel_exp(
     bb: BasicBlock,
     exp: &RelExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         RelExp::Single(exp) => build_add_exp(func, bb, exp, symtab),
         RelExp::Binary(left, op, right) => {
-            let left = build_rel_exp(func, bb, left, symtab)?;
-            let right = build_add_exp(func, bb, right, symtab)?;
+            let (left, bb) = build_rel_exp(func, bb, left, symtab)?;
+            let (right, bb) = build_add_exp(func, bb, right, symtab)?;
             let value = new_value!(func).binary(
                 match op {
                     RelOp::Lt => BinaryOp::Lt,
@@ -484,7 +488,7 @@ fn build_rel_exp(
                 right,
             );
             new_inst!(func, bb, value);
-            Ok(value)
+            Ok((value, bb))
         }
     }
 }
@@ -494,12 +498,12 @@ fn build_eq_exp(
     bb: BasicBlock,
     exp: &EqExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         EqExp::Single(exp) => build_rel_exp(func, bb, exp, symtab),
         EqExp::Binary(left, op, right) => {
-            let left = build_eq_exp(func, bb, left, symtab)?;
-            let right = build_rel_exp(func, bb, right, symtab)?;
+            let (left, bb) = build_eq_exp(func, bb, left, symtab)?;
+            let (right, bb) = build_rel_exp(func, bb, right, symtab)?;
             let value = new_value!(func).binary(
                 match op {
                     EqOp::Eq => BinaryOp::Eq,
@@ -509,53 +513,106 @@ fn build_eq_exp(
                 right,
             );
             new_inst!(func, bb, value);
-            Ok(value)
+            Ok((value, bb))
         }
     }
 }
 
-/// `a && b ` is equivalent to `(a != 0) & (b != 0)`
+/// `a && b ` is equivalent to
+/// ```c
+/// result = 0;
+/// if (a) {
+///     result = (b != 0);
+/// }
+/// ```
 fn build_land_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     exp: &LAndExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         LAndExp::Single(exp) => build_eq_exp(func, bb, exp, symtab),
         LAndExp::Binary(left, right) => {
+            let result = new_value!(func).alloc(Type::get_i32());
+            new_inst!(func, bb, result);
             let zero = new_value!(func).integer(0);
-            let left = build_land_exp(func, bb, left, symtab)?;
-            let l = new_value!(func).binary(BinaryOp::NotEq, left, zero);
-            new_inst!(func, bb, l);
-            let right = build_eq_exp(func, bb, right, symtab)?;
-            let r = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-            new_inst!(func, bb, r);
-            let value = new_value!(func).binary(BinaryOp::And, l, r);
-            new_inst!(func, bb, value);
-            Ok(value)
+            let assign = new_value!(func).store(zero, result);
+            new_inst!(func, bb, assign);
+
+            let (left, bb) = build_land_exp(func, bb, left, symtab)?;
+
+            let id = AND_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let and = new_bb!(func).basic_block(Some(format!("%and_{id}")));
+            add_bb!(func, and);
+            let end_and = new_bb!(func).basic_block(Some(format!("%endand_{id}")));
+            add_bb!(func, end_and);
+
+            let branch = new_value!(func).branch(left, and, end_and);
+            new_inst!(func, bb, branch);
+
+            let (right, bb) = build_eq_exp(func, and, right, symtab)?;
+            let zero = new_value!(func).integer(0);
+            let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+            new_inst!(func, bb, right);
+            let assign = new_value!(func).store(right, result);
+            new_inst!(func, bb, assign);
+            let jmp = new_value!(func).jump(end_and);
+            new_inst!(func, bb, jmp);
+
+            let result = new_value!(func).load(result);
+            new_inst!(func, end_and, result);
+            Ok((result, end_and))
         }
     }
 }
 
-/// `a || b ` is equivalent to `(a | b) != 0`
+/// `a || b ` is equivalent to
+/// ```c
+/// result = 1;
+/// if (!a) {
+///     result = (b != 0);
+/// }
+/// ```
 fn build_lor_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     exp: &LOrExp,
     symtab: &SymbolTable,
-) -> Result<Value, Error> {
+) -> Result<(Value, BasicBlock), Error> {
     match exp {
         LOrExp::Single(exp) => build_land_exp(func, bb, exp, symtab),
         LOrExp::Binary(left, right) => {
             let zero = new_value!(func).integer(0);
-            let left = build_lor_exp(func, bb, left, symtab)?;
-            let right = build_land_exp(func, bb, right, symtab)?;
-            let or = new_value!(func).binary(BinaryOp::Or, left, right);
-            new_inst!(func, bb, or);
-            let value = new_value!(func).binary(BinaryOp::NotEq, or, zero);
-            new_inst!(func, bb, value);
-            Ok(value)
+            let one = new_value!(func).integer(1);
+
+            let result = new_value!(func).alloc(Type::get_i32());
+            new_inst!(func, bb, result);
+            let assign = new_value!(func).store(one, result);
+            new_inst!(func, bb, assign);
+
+            let (left, bb) = build_lor_exp(func, bb, left, symtab)?;
+
+            let id = OR_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let or = new_bb!(func).basic_block(Some(format!("%or_{id}")));
+            add_bb!(func, or);
+            let end_or = new_bb!(func).basic_block(Some(format!("%endor_{id}")));
+            add_bb!(func, end_or);
+
+            let branch = new_value!(func).branch(left, end_or, or);
+            new_inst!(func, bb, branch);
+
+            let (right, bb) = build_land_exp(func, or, right, symtab)?;
+            let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+            new_inst!(func, bb, right);
+            let assign = new_value!(func).store(right, result);
+            new_inst!(func, bb, assign);
+            let jmp = new_value!(func).jump(end_or);
+            new_inst!(func, bb, jmp);
+
+            let result = new_value!(func).load(result);
+            new_inst!(func, end_or, result);
+            Ok((result, end_or))
         }
     }
 }

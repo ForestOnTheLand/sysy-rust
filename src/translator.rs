@@ -56,6 +56,7 @@ fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) -> 
     for (&bb, node) in func_data.layout().bbs() {
         let name = block_tag(func_data, bb)?;
         if name != "entry" {
+            println!("{name}");
             writeln!(output, "{name}:").map_err(Error::IOError)?;
         }
         for &inst in node.insts().keys() {
@@ -108,7 +109,7 @@ fn translate_instruction(
     // Where the result is stored
     let reg = match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(int) => {
-            let reg = config.table.get_vaccant()?;
+            let reg = config.table.get_vaccant().unwrap();
             writeln!(output, "  li {}, {}", reg, int.value()).map_err(Error::IOError)?;
             Some(reg)
         }
@@ -131,10 +132,11 @@ fn translate_instruction(
         }
 
         ValueKind::Binary(bin) => {
-            let left = translate_value(bin.lhs(), output, config)?;
-            let right = translate_value(bin.rhs(), output, config)?;
-            config.table.reset(left)?;
-            config.table.reset(right)?;
+            let left = translate_value(bin.lhs(), output, config).unwrap();
+            let right = translate_value(bin.rhs(), output, config).unwrap();
+            println!("{left}, {right}");
+            config.table.reset(left).unwrap();
+            config.table.reset(right).unwrap();
             let res = config.table.get_vaccant()?;
 
             match bin.op() {
@@ -205,11 +207,6 @@ fn translate_instruction(
         _ => unimplemented!(),
     };
 
-    // And insert it after getting `result`
-    // if let Some(reg) = result {
-    //     config.symbol.store_register(value, reg)?;
-    // }
-
     if config.func_data.dfg().value(value).ty().is_unit() {
         writeln!(output, "  # void type").map_err(Error::IOError)?;
         return Ok(());
@@ -239,6 +236,7 @@ fn translate_value(
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
 ) -> Result<Register, Error> {
+    writeln!(output, "  # Translate Value").unwrap();
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => Ok(*reg),
         Some(AllocPos::Stack(offset)) => {
