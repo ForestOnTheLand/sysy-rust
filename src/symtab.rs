@@ -1,7 +1,7 @@
 //! Symbol table for KoopaIR.
 
 use crate::util::Error;
-use koopa::ir::Value;
+use koopa::ir::{BasicBlock, Value};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -13,18 +13,22 @@ pub enum Symbol {
 /// Symbol table, supporting nested blocks
 pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,
+    loops: Vec<(BasicBlock, BasicBlock)>,
 }
 
 impl SymbolTable {
     pub fn new() -> SymbolTable {
-        SymbolTable { data: Vec::new() }
+        SymbolTable {
+            data: Vec::new(),
+            loops: Vec::new(),
+        }
     }
 
-    pub fn push(&mut self) {
+    pub fn enter_block(&mut self) {
         self.data.push(HashMap::new());
     }
 
-    pub fn pop(&mut self) -> Result<(), Error> {
+    pub fn quit_block(&mut self) -> Result<(), Error> {
         self.data.pop().ok_or(Error::InternalError(
             "symbol table gets empty before it should be".to_string(),
         ))?;
@@ -103,5 +107,36 @@ impl SymbolTable {
 
     pub fn size(&self) -> usize {
         self.data.len()
+    }
+
+    pub fn enter_loop(&mut self, entry: BasicBlock, end: BasicBlock) {
+        self.loops.push((entry, end));
+    }
+
+    pub fn quit_loop(&mut self) -> Result<(), Error> {
+        self.loops.pop().ok_or(Error::InternalError(
+            "loop table gets empty before it should be".to_string(),
+        ))?;
+        Ok(())
+    }
+
+    pub fn loop_entry(&self) -> Result<BasicBlock, Error> {
+        Ok(self
+            .loops
+            .last()
+            .ok_or(Error::ParseError(
+                "invalid `continue` instruction found".to_string(),
+            ))?
+            .0)
+    }
+
+    pub fn loop_end(&self) -> Result<BasicBlock, Error> {
+        Ok(self
+            .loops
+            .last()
+            .ok_or(Error::ParseError(
+                "invalid `break` instruction found".to_string(),
+            ))?
+            .1)
     }
 }

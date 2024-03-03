@@ -97,12 +97,12 @@ fn build_block(
     block: &Block,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
-    symtab.push();
+    symtab.enter_block();
     let mut next_bb = bb;
     for block_item in block.block_items.iter() {
         next_bb = build_block_item(func, next_bb, block_item, symtab);
     }
-    symtab.pop().unwrap();
+    symtab.quit_block().unwrap();
     next_bb
 }
 
@@ -373,6 +373,9 @@ fn build_stmt(
             let id = WHILE_COUNTER.fetch_add(1, Ordering::Relaxed);
             let entry = new_bb!(func).basic_block(Some(format!("%while_entry_{id}")));
             add_bb!(func, entry);
+            let end = new_bb!(func).basic_block(Some(format!("%while_end_{id}")));
+
+            symtab.enter_loop(entry, end);
 
             let enter = new_value!(func).jump(entry);
             new_inst!(func, bb, enter);
@@ -384,13 +387,32 @@ fn build_stmt(
             let jump = new_value!(func).jump(entry);
             new_inst!(func, end_body, jump);
 
-            let end = new_bb!(func).basic_block(Some(format!("%while_end_{id}")));
             add_bb!(func, end);
 
             let branch = new_value!(func).branch(cond, body, end);
             new_inst!(func, end_entry, branch);
 
+            symtab.quit_loop().unwrap();
+
             end
+        }
+
+        Stmt::Break => {
+            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let target = symtab.loop_end().unwrap();
+            let jump = new_value!(func).jump(target);
+            new_inst!(func, bb, jump);
+            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
+            end_bb
+        }
+
+        Stmt::Continue => {
+            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let target = symtab.loop_entry().unwrap();
+            let jump = new_value!(func).jump(target);
+            new_inst!(func, bb, jump);
+            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
+            end_bb
         }
     }
 }

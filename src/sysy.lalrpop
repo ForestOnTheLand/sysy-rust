@@ -49,6 +49,8 @@ MatchedStmt: Box<Stmt> = {
     "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: MatchedStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
     <Block> => Box::new(Stmt::Block(Box::new( <> ))),
     "while" "(" <Exp> ")" <MatchedStmt> => Box::new(Stmt::While( <> )),
+    "break" ";" => Box::new(Stmt::Break),
+    "continue" ";" => Box::new(Stmt::Continue),
     "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )), 
 }
 

@@ -43,6 +43,8 @@ pub enum BlockItem {
 ///        | [`Block`]
 ///        | `"if"` `"("` [`Exp`] `")"` [`Stmt`] [`"else"` [`Stmt`]]
 ///        | "while" "(" [`Exp`] ")" [`Stmt`]
+///        | "break" ";"
+///        | "continue" ";"
 ///        | `"return"` [`Exp`] `";"`
 #[derive(Debug)]
 pub enum Stmt {
@@ -51,6 +53,8 @@ pub enum Stmt {
     Block(Box<Block>),
     Condition(Box<Exp>, Box<Stmt>, Option<Box<Stmt>>),
     While(Box<Exp>, Box<Stmt>),
+    Break,
+    Continue,
     Return(Box<Exp>),
 }
 
