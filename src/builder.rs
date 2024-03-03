@@ -13,6 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static CONDITION_COUNTER: AtomicUsize = AtomicUsize::new(1);
 static AND_COUNTER: AtomicUsize = AtomicUsize::new(1);
 static OR_COUNTER: AtomicUsize = AtomicUsize::new(1);
+static WHILE_COUNTER: AtomicUsize = AtomicUsize::new(1);
 static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
 /// Add an instruction into a function.
@@ -366,6 +367,30 @@ fn build_stmt(
             let branch = new_value!(func).branch(cond, true_bb, else_bb);
             new_inst!(func, bb, branch);
             end_bb
+        }
+
+        Stmt::While(exp, stmt) => {
+            let id = WHILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let entry = new_bb!(func).basic_block(Some(format!("%while_entry_{id}")));
+            add_bb!(func, entry);
+
+            let enter = new_value!(func).jump(entry);
+            new_inst!(func, bb, enter);
+            let (cond, end_entry) = build_exp(func, entry, exp, symtab);
+
+            let body = new_bb!(func).basic_block(Some(format!("%while_body_{id}")));
+            add_bb!(func, body);
+            let end_body = build_stmt(func, body, stmt, symtab);
+            let jump = new_value!(func).jump(entry);
+            new_inst!(func, end_body, jump);
+
+            let end = new_bb!(func).basic_block(Some(format!("%while_end_{id}")));
+            add_bb!(func, end);
+
+            let branch = new_value!(func).branch(cond, body, end);
+            new_inst!(func, end_entry, branch);
+
+            end
         }
     }
 }

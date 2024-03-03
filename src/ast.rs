@@ -42,6 +42,7 @@ pub enum BlockItem {
 ///        | [`Exp`] `";"`
 ///        | [`Block`]
 ///        | `"if"` `"("` [`Exp`] `")"` [`Stmt`] [`"else"` [`Stmt`]]
+///        | "while" "(" [`Exp`] ")" [`Stmt`]
 ///        | `"return"` [`Exp`] `";"`
 #[derive(Debug)]
 pub enum Stmt {
@@ -49,6 +50,7 @@ pub enum Stmt {
     Exp(Option<Box<Exp>>),
     Block(Box<Block>),
     Condition(Box<Exp>, Box<Stmt>, Option<Box<Stmt>>),
+    While(Box<Exp>, Box<Stmt>),
     Return(Box<Exp>),
 }
 

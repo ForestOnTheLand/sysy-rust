@@ -36,6 +36,7 @@ BlockItem: Box<BlockItem> = {
 //        | [Exp] ";"
 //        | Block
 //        | "if" "(" Exp ")" Stmt ["else" Stmt]
+//        | "while" "(" Exp ")" Stmt
 //        | "return" [Exp] ";";
 Stmt: Box<Stmt> = {
     MatchedStmt => <>,
@@ -47,12 +48,15 @@ MatchedStmt: Box<Stmt> = {
     <Exp?> ";" => Box::new(Stmt::Exp( <> )),
     "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: MatchedStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
     <Block> => Box::new(Stmt::Block(Box::new( <> ))),
+    "while" "(" <Exp> ")" <MatchedStmt> => Box::new(Stmt::While( <> )),
     "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )), 
 }
 
+// Something that should have no trailing "else"
 OpenStmt: Box<Stmt> = {
     "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: OpenStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
     "if" "(" <exp: Exp> ")" <s1: Stmt> => Box::new(Stmt::Condition(exp, s1, None)),
+    "while" "(" <Exp> ")" <OpenStmt> => Box::new(Stmt::While( <> )),
 }
 
 // Decl ::= ConstDecl | VarDecl;
