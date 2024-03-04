@@ -13,15 +13,31 @@ match {
     _
 }
 
-pub CompUnit: CompUnit = <func_def: FuncDef> => CompUnit { <> };
+pub CompUnit: Box<CompUnit> = <comp_unit: CompUnit?> <func_def: FuncDef> => Box::new(CompUnit { <> });
 
+// FuncDef     ::= FuncType IDENT "(" [FuncFParams] ")" Block;
 FuncDef: FuncDef = {
-    <func_type: FuncType> <ident: Ident> "(" ")" <block: Block> => {
+    <func_type: FuncType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
         FuncDef { <> }
     }
 }
 
-FuncType: FuncType = "int" => FuncType::Int;
+// FuncType    ::= "void" | "int";
+FuncType: FuncType = {
+    "void" => FuncType::Void,
+    "int" => FuncType::Int,
+}
+
+// FuncFParams ::= FuncFParam {"," FuncFParam};
+FuncFParams: FuncFParams = <mut params: (<FuncFParam> ",")*> <param: FuncFParam> ";" => {
+    params.push(param);
+    FuncFParams {
+        params
+    }
+};
+
+// FuncFParam  ::= BType IDENT;
+FuncFParam: FuncFParam = <btype: BType> <ident: Ident> => FuncFParam{ <> };
 
 // Block ::= "{" {BlockItem} "}";
 Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
@@ -111,11 +127,19 @@ PrimaryExp: Box<PrimaryExp> = {
     LVal => Box::new(PrimaryExp::LVal( <> )),
     Number => Box::new(PrimaryExp::Number( <> )),
 }
-// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp;
+// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp | IDENT "(" [FuncRParams] ")";
 UnaryExp: Box<UnaryExp> = {
     PrimaryExp => Box::new(UnaryExp::Single( <> )),
     UnaryOp UnaryExp => Box::new(UnaryExp::Unary( <> )),
+    <Ident> "(" <FuncRParams?> ")" => Box::new(UnaryExp::Call( <> )),
 }
+// FuncRParams ::= Exp {"," Exp}
+FuncRParams: Box<FuncRParams> = <mut exps: (<Exp> ",")*> <exp: Exp> => {
+    exps.push(exp);
+    Box::new(FuncRParams {
+        exps: exps,
+    })
+};
 // UnaryOp ::= "+" | "-" | "!";
 UnaryOp: UnaryOp = {
     "+" => UnaryOp::Pos,

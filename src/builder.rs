@@ -70,6 +70,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef) {
         Vec::new(),
         match func_def.func_type {
             FuncType::Int => Type::get_i32(),
+            FuncType::Void => Type::get_unit(),
         },
     );
     let func = program.new_func(func);
@@ -208,6 +209,9 @@ fn compute_unary_exp(exp: &UnaryExp, symtab: &SymbolTable) -> i32 {
                 UnaryOp::Neg => -val,
                 UnaryOp::Not => !val,
             }
+        }
+        UnaryExp::Call(ident, params) => {
+            panic!("cannot evaluate function at compile time");
         }
     }
 }
@@ -452,6 +456,7 @@ fn build_unary_exp(
                 }
             }
         }
+        UnaryExp::Call(ident, params) => unimplemented!(),
     }
 }
 

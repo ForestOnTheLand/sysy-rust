@@ -1,28 +1,44 @@
 //! In this file, different kinds of AST are defined
 //! using BNF, with the following special notations:
 //!
-//! - {A} means repeating A 0 or more times
-//! - \[A\] means optional A
+//! - {`A`} means repeating `A` for 0 or more times
+//! - \[`A`\] means optional `A`
 //!
 
-/// [`CompUnit`] `::=` [`FuncDef`]
+/// [`CompUnit`] `::=` [[`CompUnit`]] [`FuncDef`]
 #[derive(Debug)]
 pub struct CompUnit {
+    pub comp_unit: Option<Box<CompUnit>>,
     pub func_def: FuncDef,
 }
 
-/// [`FuncDef`] `::=` [`FuncType`] `IDENT` `"("` `")"` [`Block`]
+/// [`FuncDef`] `::=` [`FuncType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: FuncType,
     pub ident: String,
+    pub params: Option<FuncFParams>,
     pub block: Block,
 }
 
-/// [`FuncType`] `::=` `"int"`
+/// [`FuncType`] `::=` `"void"` | `"int"`
 #[derive(Debug)]
 pub enum FuncType {
+    Void,
     Int,
+}
+
+/// [`FuncFParams`] ::= [`FuncFParam`] {"," [`FuncFParam`]}
+#[derive(Debug)]
+pub struct FuncFParams {
+    pub params: Vec<FuncFParam>,
+}
+
+/// [`FuncFParam`]  ::= [`BType`] `IDENT`
+#[derive(Debug)]
+pub struct FuncFParam {
+    pub btype: BType,
+    pub ident: String,
 }
 
 /// [`Block`] `::=` `"{"` {[`BlockItem`]} `"}"`
@@ -136,11 +152,20 @@ pub enum PrimaryExp {
     Number(i32),
 }
 
-/// [`UnaryExp`] `::=` [`PrimaryExp`] | [`UnaryOp`] [`UnaryExp`]
+/// [`UnaryExp`] `::=` [`PrimaryExp`]
+///            | [`UnaryOp`] [`UnaryExp`]
+///            | `IDENT` `"("` [[`FuncRParams`]] `")"`
 #[derive(Debug)]
 pub enum UnaryExp {
     Single(Box<PrimaryExp>),
     Unary(UnaryOp, Box<UnaryExp>),
+    Call(String, Option<Box<FuncRParams>>),
+}
+
+/// [`FuncRParams`] ::= [`Exp`] {"," [`Exp`]};
+#[derive(Debug)]
+pub struct FuncRParams {
+    pub exps: Vec<Box<Exp>>,
 }
 
 /// [`UnaryOp`] `::=` `"+"` | `"-"` | `"!"`
