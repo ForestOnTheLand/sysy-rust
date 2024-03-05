@@ -60,27 +60,66 @@ pub fn output_program(program: &Program, output: impl io::Write) {
 
 pub fn build_program(comp_unit: &CompUnit) -> Program {
     let mut program = Program::new();
-    build_function(&mut program, &comp_unit.func_def);
+    let mut symtab = SymbolTable::new();
+    build_comp_unit(&mut program, comp_unit, &mut symtab);
     program
 }
 
-fn build_function(program: &mut Program, func_def: &FuncDef) {
-    let func = FunctionData::new(
-        format!("@{}", func_def.ident),
-        Vec::new(),
-        match func_def.func_type {
-            FuncType::Int => Type::get_i32(),
-            FuncType::Void => Type::get_unit(),
-        },
-    );
-    let func = program.new_func(func);
-    let mut symtab = SymbolTable::new();
+fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
+    if let Some(c) = &comp_unit.comp_unit {
+        build_comp_unit(program, c, symtab);
+    }
+    build_function(program, &comp_unit.func_def, symtab);
+}
 
+fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
+    symtab.enter_block();
+    let params = {
+        let mut params = Vec::new();
+        if let Some(p) = &func_def.params {
+            for param in p.params.iter() {
+                params.push((
+                    Some(format!("@{}", param.ident)),
+                    match param.btype {
+                        BType::Int => Type::get_i32(),
+                    },
+                ))
+            }
+        }
+        params
+    };
+    let ret_ty = match func_def.func_type {
+        FuncType::Int => Type::get_i32(),
+        FuncType::Void => Type::get_unit(),
+    };
+    let func =
+        FunctionData::with_param_names(format!("@{}", func_def.ident), params, ret_ty.clone());
+    let func = program.new_func(func);
     let func_data = program.func_mut(func);
+    symtab
+        .insert_function(func_def.ident.clone(), func)
+        .unwrap();
+
     let bb = new_bb!(func_data).basic_block(Some("%entry".into()));
     add_bb!(func_data, bb);
 
-    build_block(func_data, bb, &func_def.block, &mut symtab);
+    if let Some(params) = func_def.params.as_ref() {
+        build_params(func_data, bb, params, symtab);
+    }
+
+    let bb = build_block(func_data, bb, &func_def.block, symtab);
+    if !is_unused_block(func_data, bb) {
+        if ret_ty.is_unit() {
+            let ret = new_value!(func_data).ret(None);
+            new_inst!(func_data, bb, ret);
+        } else {
+            panic!(
+                "parse error: Expected a `return` instruction at the end of a non-void function '{}' with return type '{:#?}'",
+                func_data.name(), ret_ty
+            );
+        }
+    }
+    symtab.quit_block().unwrap();
 }
 
 fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
@@ -90,6 +129,24 @@ fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
         .as_ref()
         .expect("basic blocks should have a non-default name")
         .starts_with("%unused")
+}
+
+fn build_params(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    params: &FuncFParams,
+    symtab: &mut SymbolTable,
+) {
+    for i in 0..params.params.len() {
+        let value = func.params()[i];
+        let ident = format!("%{}_p", params.params[i].ident);
+        let p = new_value!(func).alloc(Type::get_i32());
+        func.dfg_mut().set_value_name(p, Some(ident.clone()));
+        new_inst!(func, bb, p);
+        let store = new_value!(func).store(value, p);
+        new_inst!(func, bb, store);
+        symtab.insert_var(&params.params[i].ident, p).unwrap();
+    }
 }
 
 fn build_block(
@@ -210,7 +267,7 @@ fn compute_unary_exp(exp: &UnaryExp, symtab: &SymbolTable) -> i32 {
                 UnaryOp::Not => !val,
             }
         }
-        UnaryExp::Call(ident, params) => {
+        UnaryExp::Call(_, _) => {
             panic!("cannot evaluate function at compile time");
         }
     }
@@ -325,9 +382,14 @@ fn build_stmt(
             bb
         }
         Stmt::Return(exp) => {
-            let (ret_val, bb) = build_exp(func, bb, exp, symtab);
-            let ret = new_value!(func).ret(Some(ret_val));
-            new_inst!(func, bb, ret);
+            if let Some(exp) = exp {
+                let (ret_val, bb) = build_exp(func, bb, exp, symtab);
+                let ret = new_value!(func).ret(Some(ret_val));
+                new_inst!(func, bb, ret);
+            } else {
+                let ret = new_value!(func).ret(None);
+                new_inst!(func, bb, ret);
+            }
             let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
             let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
             // add_bb!(func, end_bb);
@@ -456,7 +518,20 @@ fn build_unary_exp(
                 }
             }
         }
-        UnaryExp::Call(ident, params) => unimplemented!(),
+        UnaryExp::Call(ident, params) => {
+            let mut bb = bb;
+            let mut args = Vec::new();
+            if let Some(params) = params {
+                for param in params.exps.iter() {
+                    let (value, next_bb) = build_exp(func, bb, param, symtab);
+                    bb = next_bb;
+                    args.push(value);
+                }
+            }
+            let result = new_value!(func).call(symtab.get_function(ident).unwrap(), args);
+            new_inst!(func, bb, result);
+            (result, bb)
+        }
     }
 }
 

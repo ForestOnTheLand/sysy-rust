@@ -28,8 +28,8 @@ FuncType: FuncType = {
     "int" => FuncType::Int,
 }
 
-// FuncFParams ::= FuncFParam {"," FuncFParam};
-FuncFParams: FuncFParams = <mut params: (<FuncFParam> ",")*> <param: FuncFParam> ";" => {
+// FuncFParams ::= FuncFParam {"," FuncFParam}
+FuncFParams: FuncFParams = <mut params: (<FuncFParam> ",")*> <param: FuncFParam> => {
     params.push(param);
     FuncFParams {
         params
@@ -67,7 +67,7 @@ MatchedStmt: Box<Stmt> = {
     "while" "(" <Exp> ")" <MatchedStmt> => Box::new(Stmt::While( <> )),
     "break" ";" => Box::new(Stmt::Break),
     "continue" ";" => Box::new(Stmt::Continue),
-    "return" <exp: Exp> ";" => Box::new(Stmt::Return( <> )), 
+    "return" <exp: Exp?> ";" => Box::new(Stmt::Return( <> )), 
 }
 
 // Something that should have no trailing "else"

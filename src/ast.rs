@@ -61,7 +61,7 @@ pub enum BlockItem {
 ///        | "while" "(" [`Exp`] ")" [`Stmt`]
 ///        | "break" ";"
 ///        | "continue" ";"
-///        | `"return"` [`Exp`] `";"`
+///        | `"return"` [[`Exp`]] `";"`
 #[derive(Debug)]
 pub enum Stmt {
     Assign(LVal, Box<Exp>),
@@ -71,7 +71,7 @@ pub enum Stmt {
     While(Box<Exp>, Box<Stmt>),
     Break,
     Continue,
-    Return(Box<Exp>),
+    Return(Option<Box<Exp>>),
 }
 
 /// [`Decl`] `::=` [`ConstDecl`] | [`VarDecl`]

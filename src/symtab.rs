@@ -1,7 +1,7 @@
 //! Symbol table for KoopaIR.
 
 use crate::util::Error;
-use koopa::ir::{BasicBlock, Value};
+use koopa::ir::{BasicBlock, Function, Value};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Copy)]
@@ -14,13 +14,15 @@ pub enum Symbol {
 pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,
     loops: Vec<(BasicBlock, BasicBlock)>,
+    function: HashMap<String, Function>,
 }
 
 impl SymbolTable {
     pub fn new() -> SymbolTable {
         SymbolTable {
-            data: Vec::new(),
+            data: vec![HashMap::new()],
             loops: Vec::new(),
+            function: HashMap::new(),
         }
     }
 
@@ -103,6 +105,22 @@ impl SymbolTable {
             }
         }
         Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+    }
+
+    pub fn insert_function(&mut self, ident: String, function: Function) -> Result<(), Error> {
+        if let Some(_) = self.function.insert(ident.clone(), function) {
+            Err(Error::ParseError(format!("function '{ident}' redefined")))
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn get_function(&self, ident: &String) -> Result<Function, Error> {
+        if let Some(f) = self.function.get(ident) {
+            Ok(*f)
+        } else {
+            Err(Error::ParseError(format!("function '{ident}' undefined")))
+        }
     }
 
     pub fn size(&self) -> usize {
