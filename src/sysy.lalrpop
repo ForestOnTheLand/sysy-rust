@@ -13,7 +13,11 @@ match {
     _
 }
 
-pub CompUnit: Box<CompUnit> = <comp_unit: CompUnit?> <func_def: FuncDef> => Box::new(CompUnit { <> });
+// CompUnit ::= [CompUnit] (Decl | FuncDef);
+pub CompUnit: Box<CompUnit> = {
+    <comp_unit: CompUnit?> <func_def: FuncDef> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::FuncDef(func_def)) }),
+    <comp_unit: CompUnit?> <decl: Decl> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::Decl(decl)) }),
+}
 
 // FuncDef     ::= FuncType IDENT "(" [FuncFParams] ")" Block;
 FuncDef: FuncDef = {

@@ -5,11 +5,17 @@
 //! - \[`A`\] means optional `A`
 //!
 
-/// [`CompUnit`] `::=` [[`CompUnit`]] [`FuncDef`]
+/// [`CompUnit`] `::=` [[`CompUnit`]] ([`Decl`] | [`FuncDef`])
 #[derive(Debug)]
 pub struct CompUnit {
     pub comp_unit: Option<Box<CompUnit>>,
-    pub func_def: FuncDef,
+    pub item: Box<GlobalItem>,
+}
+
+#[derive(Debug)]
+pub enum GlobalItem {
+    Decl(Box<Decl>),
+    FuncDef(Box<FuncDef>),
 }
 
 /// [`FuncDef`] `::=` [`FuncType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]

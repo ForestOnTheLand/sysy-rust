@@ -4,7 +4,7 @@ use crate::ast::*;
 use crate::symtab::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
-use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Type, Value};
+use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
 use std::io;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -61,40 +61,65 @@ pub fn output_program(program: &Program, output: impl io::Write) {
 pub fn build_program(comp_unit: &CompUnit) -> Program {
     let mut program = Program::new();
     let mut symtab = SymbolTable::new();
+    declare_builtins(&mut program, &mut symtab);
     build_comp_unit(&mut program, comp_unit, &mut symtab);
     program
+}
+
+fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
+    let builtin_functions: Vec<(String, Vec<Type>, Type)> = vec![
+        // decl @getint(): i32
+        ("@getint".to_string(), vec![], Type::get_i32()),
+        // decl @getch(): i32
+        ("@getch".to_string(), vec![], Type::get_i32()),
+        // decl @getarray(*i32): i32
+        (
+            "@getarray".to_string(),
+            vec![Type::get_pointer(Type::get_i32())],
+            Type::get_i32(),
+        ),
+        // decl @putint(i32)
+        (
+            "@putint".to_string(),
+            vec![Type::get_i32()],
+            Type::get_unit(),
+        ),
+        // decl @putch(i32)
+        (
+            "@putch".to_string(),
+            vec![Type::get_i32()],
+            Type::get_unit(),
+        ),
+        // decl @putarray(i32, *i32)
+        (
+            "@putarray".to_string(),
+            vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
+            Type::get_unit(),
+        ),
+        // decl @starttime()
+        ("@starttime".to_string(), vec![], Type::get_unit()),
+        // decl @stoptime()
+        ("@stoptime".to_string(), vec![], Type::get_unit()),
+    ];
+    for (name, params_ty, ret_ty) in builtin_functions {
+        let data = FunctionData::new_decl(name, params_ty, ret_ty);
+        program.new_func(data);
+    }
 }
 
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
     if let Some(c) = &comp_unit.comp_unit {
         build_comp_unit(program, c, symtab);
     }
-    build_function(program, &comp_unit.func_def, symtab);
+    match &comp_unit.item {
+        GlobalItem::Decl(decl) => unimplemented!(),
+        GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
+    }
 }
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
     symtab.enter_block();
-    let params = {
-        let mut params = Vec::new();
-        if let Some(p) = &func_def.params {
-            for param in p.params.iter() {
-                params.push((
-                    Some(format!("@{}", param.ident)),
-                    match param.btype {
-                        BType::Int => Type::get_i32(),
-                    },
-                ))
-            }
-        }
-        params
-    };
-    let ret_ty = match func_def.func_type {
-        FuncType::Int => Type::get_i32(),
-        FuncType::Void => Type::get_unit(),
-    };
-    let func =
-        FunctionData::with_param_names(format!("@{}", func_def.ident), params, ret_ty.clone());
-    let func = program.new_func(func);
+    let (func, ret) = parse_function(program, func_def);
     let func_data = program.func_mut(func);
     symtab
         .insert_function(func_def.ident.clone(), func)
@@ -109,17 +134,37 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
 
     let bb = build_block(func_data, bb, &func_def.block, symtab);
     if !is_unused_block(func_data, bb) {
-        if ret_ty.is_unit() {
+        if ret.is_unit() {
             let ret = new_value!(func_data).ret(None);
             new_inst!(func_data, bb, ret);
         } else {
             panic!(
-                "parse error: Expected a `return` instruction at the end of a non-void function '{}' with return type '{:#?}'",
-                func_data.name(), ret_ty
+                "parse error: Expected a `return` instruction at the end of a non-void function '{}'",
+                func_data.name()
             );
         }
     }
     symtab.quit_block().unwrap();
+}
+
+fn parse_function(program: &mut Program, func_def: &FuncDef) -> (Function, Type) {
+    let mut params = Vec::new();
+    if let Some(p) = &func_def.params {
+        for param in p.params.iter() {
+            params.push((
+                Some(format!("@{}", param.ident)),
+                match param.btype {
+                    BType::Int => Type::get_i32(),
+                },
+            ))
+        }
+    }
+    let ret_ty = match func_def.func_type {
+        FuncType::Int => Type::get_i32(),
+        FuncType::Void => Type::get_unit(),
+    };
+    let f = FunctionData::with_param_names(format!("@{}", func_def.ident), params, ret_ty.clone());
+    (program.new_func(f), ret_ty)
 }
 
 fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
