@@ -108,12 +108,12 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
 }
 
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
-    if let Some(c) = &comp_unit.comp_unit {
-        build_comp_unit(program, c, symtab);
-    }
-    match &comp_unit.item {
+    match comp_unit.item.as_ref() {
         GlobalItem::Decl(decl) => unimplemented!(),
         GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
+    }
+    if let Some(c) = &comp_unit.comp_unit {
+        build_comp_unit(program, c, symtab);
     }
 }
 
@@ -154,14 +154,15 @@ fn parse_function(program: &mut Program, func_def: &FuncDef) -> (Function, Type)
             params.push((
                 Some(format!("@{}", param.ident)),
                 match param.btype {
-                    BType::Int => Type::get_i32(),
+                    BuiltinType::Int => Type::get_i32(),
+                    _ => panic!("parse error: `void` is not a valid type for variables"),
                 },
             ))
         }
     }
     let ret_ty = match func_def.func_type {
-        FuncType::Int => Type::get_i32(),
-        FuncType::Void => Type::get_unit(),
+        BuiltinType::Int => Type::get_i32(),
+        BuiltinType::Void => Type::get_unit(),
     };
     let f = FunctionData::with_param_names(format!("@{}", func_def.ident), params, ret_ty.clone());
     (program.new_func(f), ret_ty)

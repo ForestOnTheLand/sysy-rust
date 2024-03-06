@@ -4,12 +4,22 @@
 //! - {`A`} means repeating `A` for 0 or more times
 //! - \[`A`\] means optional `A`
 //!
+//! Some grammars are different from that in the writeup,
+//! in order to eliminate ambiguity and conflict.
+//!
 
-/// [`CompUnit`] `::=` [[`CompUnit`]] ([`Decl`] | [`FuncDef`])
+/// [`BuiltinType`] `::=` `"void"` | `"int"`
+#[derive(Debug)]
+pub enum BuiltinType {
+    Void,
+    Int,
+}
+
+/// [`CompUnit`] `::=` ([`Decl`] | [`FuncDef`]) [[`CompUnit`]]
 #[derive(Debug)]
 pub struct CompUnit {
-    pub comp_unit: Option<Box<CompUnit>>,
     pub item: Box<GlobalItem>,
+    pub comp_unit: Option<Box<CompUnit>>,
 }
 
 #[derive(Debug)]
@@ -18,20 +28,13 @@ pub enum GlobalItem {
     FuncDef(Box<FuncDef>),
 }
 
-/// [`FuncDef`] `::=` [`FuncType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]
+/// [`FuncDef`] `::=` [`BuiltinType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]
 #[derive(Debug)]
 pub struct FuncDef {
-    pub func_type: FuncType,
+    pub func_type: BuiltinType,
     pub ident: String,
     pub params: Option<FuncFParams>,
     pub block: Block,
-}
-
-/// [`FuncType`] `::=` `"void"` | `"int"`
-#[derive(Debug)]
-pub enum FuncType {
-    Void,
-    Int,
 }
 
 /// [`FuncFParams`] ::= [`FuncFParam`] {"," [`FuncFParam`]}
@@ -40,10 +43,10 @@ pub struct FuncFParams {
     pub params: Vec<FuncFParam>,
 }
 
-/// [`FuncFParam`]  ::= [`BType`] `IDENT`
+/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT`
 #[derive(Debug)]
 pub struct FuncFParam {
-    pub btype: BType,
+    pub btype: BuiltinType,
     pub ident: String,
 }
 
@@ -87,10 +90,10 @@ pub enum Decl {
     Var(Box<VarDecl>),
 }
 
-/// [`VarDecl`] `::=` [`BType`] [`VarDef`] {`","` [`VarDef`]} `""`
+/// [`VarDecl`] `::=` [`BuiltinType`] [`VarDef`] {`","` [`VarDef`]} `""`
 #[derive(Debug)]
 pub struct VarDecl {
-    pub btype: BType,
+    pub btype: BuiltinType,
     pub var_defs: Vec<Box<VarDef>>,
 }
 
@@ -106,18 +109,17 @@ pub struct InitVal {
     pub exp: Box<Exp>,
 }
 
-/// [`ConstDecl`] `::=` `"const"` [`BType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
+/// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
 #[derive(Debug)]
 pub struct ConstDecl {
-    pub btype: BType,
+    pub btype: BuiltinType,
     pub const_defs: Vec<Box<ConstDef>>,
 }
 
-/// [`BType`] `::=` `"int"`
-#[derive(Debug)]
-pub enum BType {
-    Int,
-}
+// #[derive(Debug)]
+// pub enum BuiltinType {
+//     Int,
+// }
 
 /// [`ConstDef`] `::=` `IDENT` `"="` [`ConstInitVal`]
 #[derive(Debug)]

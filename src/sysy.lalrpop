@@ -13,35 +13,35 @@ match {
     _
 }
 
-// CompUnit ::= [CompUnit] (Decl | FuncDef);
+Comma<T>: Vec<T> = <mut v: (<T> ",")*> <e: T> => {
+    v.push(e);
+    v
+};
+
+// CompUnit ::= (Decl | FuncDef) [CompUnit];
 pub CompUnit: Box<CompUnit> = {
-    <comp_unit: CompUnit?> <func_def: FuncDef> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::FuncDef(func_def)) }),
-    <comp_unit: CompUnit?> <decl: Decl> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::Decl(decl)) }),
+    <func_def: FuncDef> <comp_unit: CompUnit?> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::FuncDef(func_def)) }),
+    <decl: Decl> <comp_unit: CompUnit?> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::Decl(decl)) }),
 }
 
-// FuncDef     ::= FuncType IDENT "(" [FuncFParams] ")" Block;
-FuncDef: FuncDef = {
-    <func_type: FuncType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
-        FuncDef { <> }
+// FuncDef     ::= BuiltinType IDENT "(" [FuncFParams] ")" Block;
+FuncDef: Box<FuncDef> = {
+    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
+        Box::new(FuncDef { <> })
     }
 }
 
-// FuncType    ::= "void" | "int";
-FuncType: FuncType = {
-    "void" => FuncType::Void,
-    "int" => FuncType::Int,
+// BuiltinType    ::= "void" | "int";
+BuiltinType: BuiltinType = {
+    "void" => BuiltinType::Void,
+    "int" => BuiltinType::Int,
 }
 
 // FuncFParams ::= FuncFParam {"," FuncFParam}
-FuncFParams: FuncFParams = <mut params: (<FuncFParam> ",")*> <param: FuncFParam> => {
-    params.push(param);
-    FuncFParams {
-        params
-    }
-};
+FuncFParams: FuncFParams = <params: Comma<FuncFParam>> => FuncFParams{ <> };
 
-// FuncFParam  ::= BType IDENT;
-FuncFParam: FuncFParam = <btype: BType> <ident: Ident> => FuncFParam{ <> };
+// FuncFParam  ::= BuiltinType IDENT;
+FuncFParam: FuncFParam = <btype: BuiltinType> <ident: Ident> => FuncFParam{ <> };
 
 // Block ::= "{" {BlockItem} "}";
 Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
@@ -86,14 +86,8 @@ Decl: Box<Decl> = {
     ConstDecl => Box::new(Decl::Const( <> )),
     VarDecl => Box::new(Decl::Var( <> )),
 }
-// VarDecl ::= BType VarDef {"," VarDef} ";";
-VarDecl: Box<VarDecl> = <btype: BType> <mut var_defs: (<VarDef> ",")*> <var_def: VarDef> ";" => {
-    var_defs.push(var_def);
-    Box::new(VarDecl {
-        btype: btype,
-        var_defs: var_defs,
-    })
-};
+// VarDecl ::= BuiltinType VarDef {"," VarDef} ";";
+VarDecl: Box<VarDecl> = <btype: BuiltinType> <var_defs: Comma<VarDef>> ";" => Box::new(VarDecl { <> });
 // VarDef ::= IDENT | IDENT "=" InitVal;
 VarDef: Box<VarDef> = {
     <ident: Ident> => Box::new(VarDef {ident, init_val: None} ),
@@ -102,16 +96,10 @@ VarDef: Box<VarDef> = {
 // InitVal ::= Exp;
 InitVal: Box<InitVal> = <exp: Exp> => Box::new(InitVal { <> });
 
-// ConstDecl ::= "const" BType ConstDef {"," ConstDef} ";";
-ConstDecl: Box<ConstDecl> = "const" <btype: BType> <mut const_defs: (<ConstDef> ",")*> <const_def: ConstDef> ";" => {
-    const_defs.push(const_def);
-    Box::new(ConstDecl {
-        btype: btype,
-        const_defs: const_defs,
-    })
-};
-// BType ::= "int";
-BType: BType = "int" => BType::Int;
+// ConstDecl ::= "const" BuiltinType ConstDef {"," ConstDef} ";";
+ConstDecl: Box<ConstDecl> = "const" <btype: BuiltinType> <const_defs: Comma<ConstDef>> ";" => Box::new(ConstDecl { <> });
+// BuiltinType ::= "int";
+// BuiltinType: BuiltinType = "int" => BuiltinType::Int;
 // ConstDef ::= IDENT "=" ConstInitVal;
 ConstDef: Box<ConstDef> = <ident: Ident> "=" <const_init_val: ConstInitVal> => Box::new(ConstDef { <> });
 // ConstInitVal ::= ConstExp;
@@ -138,12 +126,7 @@ UnaryExp: Box<UnaryExp> = {
     <Ident> "(" <FuncRParams?> ")" => Box::new(UnaryExp::Call( <> )),
 }
 // FuncRParams ::= Exp {"," Exp}
-FuncRParams: Box<FuncRParams> = <mut exps: (<Exp> ",")*> <exp: Exp> => {
-    exps.push(exp);
-    Box::new(FuncRParams {
-        exps: exps,
-    })
-};
+FuncRParams: Box<FuncRParams> = <exps: Comma<Exp>> => Box::new(FuncRParams { <> });
 // UnaryOp ::= "+" | "-" | "!";
 UnaryOp: UnaryOp = {
     "+" => UnaryOp::Pos,
