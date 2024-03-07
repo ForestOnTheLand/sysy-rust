@@ -5,86 +5,98 @@
 use crate::register::*;
 use crate::util::Error;
 use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Value, ValueKind};
-use std::io;
+use std::{cmp::max, io};
 
-fn block_tag(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
-    let name = func.dfg().bb(bb).name().as_ref();
-    let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
-    let name = name
-        .strip_prefix("%")
-        .ok_or(Error::InternalError(format!(
-            "invalid function name '{name}'  generated in koopa, expected to begin with '%'"
-        )))?
-        .to_string();
-    Ok(name)
-}
-
+/// The core part of this module. Translate a KoopaIR program `program` into RISCV
+/// assembly, which is written into the `output`.
+///
+/// # Panic
+///
+/// When encountering invalid KoopaIR program or unimplemented functions
+///
 pub fn translate_program(program: &Program, output: &mut impl io::Write) {
+    // Global variables
+    // TODO
+
     // Functions
-    writeln!(output, "  .text").unwrap();
     for &func in program.func_layout() {
         let func_data = program.func(func);
-        translate_function(func_data, output);
+        translate_function(program, func_data, output);
     }
 }
 
-fn translate_function(func_data: &FunctionData, output: &mut impl io::Write) {
-    let func_name = func_data
-        .name()
-        .strip_prefix("@")
-        .ok_or(Error::InternalError(format!(
-            "invalid function name '{}' generated in koopa, expected to begin with '@'",
-            func_data.name()
-        )))
-        .unwrap();
-    writeln!(output, "  .global {}\n{}:", func_name, func_name).unwrap();
-
-    let stack_size = get_stack_size(func_data);
-
-    if stack_size > 0 {
-        writeln!(output, "  addi sp, sp, -{}", stack_size).unwrap();
-    }
+fn translate_function(program: &Program, func_data: &FunctionData, output: &mut impl io::Write) {
+    writeln!(output, "  .text").unwrap();
+    let func_name = function_name(func_data).unwrap();
+    writeln!(output, "  .globl {}\n{}:", func_name, func_name).unwrap();
+    let (stack_size, save_ra, init_pos) = allocate_stack(func_data, output);
 
     let mut config = TranslateConfig {
+        program,
         func_data,
         table: RegisterTable::new(),
         symbol: AllocTable::new(),
         stack_size,
-        stack_pos: Box::new(0),
+        save_ra,
+        stack_pos: Box::new(init_pos),
     };
 
     for (&bb, node) in func_data.layout().bbs() {
-        let name = block_tag(func_data, bb).unwrap();
+        let name = block_name(func_data, bb).unwrap();
         if !name.starts_with("entry") {
-            writeln!(output, "{name}:").map_err(Error::IOError).unwrap();
+            writeln!(output, "{name}:").unwrap();
         }
         for &inst in node.insts().keys() {
-            let on_stack = !func_data.dfg().value(inst).ty().is_unit() && config.table.remain() < 3;
+            let on_stack = !func_data.dfg().value(inst).ty().is_unit();
             translate_instruction(inst, output, &mut config, on_stack);
-            writeln!(output, "").map_err(Error::IOError).unwrap();
+            writeln!(output, "").unwrap();
         }
     }
 }
 
-fn get_stack_size(func_data: &FunctionData) -> i32 {
-    let mut counter = 0;
+/// Getting the stack size needed for a given function.
+/// The algorithm is described in detail in
+/// [writeup](https://pku-minic.github.io/online-doc/#/lv8-func-n-global/func-def-n-call?id=%e7%94%9f%e6%88%90%e4%bb%a3%e7%a0%81).
+///
+/// Basically, there are 3 different usage of stack space:
+/// - space for local variable
+/// - space for saving RISCV register `ra` (short for "return address")
+/// - space for function arguments
+fn allocate_stack(func_data: &FunctionData, output: &mut impl io::Write) -> (usize, bool, i32) {
+    let mut local = 0;
+    let mut ra = 0;
+    let mut args = 0;
     for (_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
             if !func_data.dfg().value(inst).ty().is_unit() {
-                counter += 4;
+                local += 4;
+            }
+            if let ValueKind::Call(call) = func_data.dfg().value(inst).kind() {
+                ra = 4;
+                if call.args().len() > 8 {
+                    args = max(args, call.args().len() - 8);
+                }
             }
         }
     }
-
-    // Note that we need to align the size as a multiple of 16
-    (counter + 15) & !0xf
+    let total = local + ra + args * 4;
+    let stack_size = (total + 15) & !0xf;
+    if stack_size != 0 {
+        writeln!(output, "  addi sp, sp, -{}", stack_size).unwrap();
+    }
+    if ra != 0 {
+        writeln!(output, "  sw ra, {}(sp)", stack_size - 4).unwrap();
+    }
+    (stack_size, ra != 0, (args * 4) as i32)
 }
 
 struct TranslateConfig<'a> {
+    program: &'a Program,
     func_data: &'a FunctionData,
     table: RegisterTable,
     symbol: AllocTable,
-    stack_size: i32,
+    stack_size: usize,
+    save_ra: bool,
     stack_pos: Box<i32>,
 }
 
@@ -96,14 +108,6 @@ fn translate_instruction(
     config: &mut TranslateConfig,
     on_stack: bool,
 ) {
-    // If value is already handled before, just return it directly.
-    // Note that we need to load variables on stack into register.
-    writeln!(
-        output,
-        "  # {:?}",
-        config.func_data.dfg().value(value).kind()
-    )
-    .unwrap();
     // Where the result is stored
     let reg = match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(int) => {
@@ -126,6 +130,9 @@ fn translate_instruction(
                 }
                 None => {}
             };
+            if config.save_ra {
+                writeln!(output, "  lw ra, {}(sp)", config.stack_size - 4).unwrap();
+            }
             if config.stack_size > 0 {
                 writeln!(output, "  addi sp, sp, {}", config.stack_size).unwrap();
             }
@@ -136,7 +143,6 @@ fn translate_instruction(
         ValueKind::Binary(bin) => {
             let left = translate_value(bin.lhs(), output, config);
             let right = translate_value(bin.rhs(), output, config);
-            println!("{left}, {right}");
             config.table.reset(left).unwrap();
             config.table.reset(right).unwrap();
             let res = config.table.get_vaccant().unwrap();
@@ -167,8 +173,8 @@ fn translate_instruction(
         }
 
         ValueKind::Alloc(_alloc) => {
+            writeln!(output, "  # Allocated at {}(sp)", *config.stack_pos).unwrap();
             config.symbol.store_stack(value, *config.stack_pos).unwrap();
-            writeln!(output, "  # alloc at {}(sp)", config.stack_pos).unwrap();
             *config.stack_pos += 4;
             return;
         }
@@ -192,8 +198,8 @@ fn translate_instruction(
 
         ValueKind::Branch(branch) => {
             let cond = translate_value(branch.cond(), output, config);
-            let then_tag = block_tag(config.func_data, branch.true_bb()).unwrap();
-            let else_tag = block_tag(config.func_data, branch.false_bb()).unwrap();
+            let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
+            let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
             writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
             config.table.reset(cond).unwrap();
             writeln!(output, "  j {else_tag}").unwrap();
@@ -201,17 +207,42 @@ fn translate_instruction(
         }
 
         ValueKind::Jump(jump) => {
-            let jmp_tag = block_tag(config.func_data, jump.target()).unwrap();
+            let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
             writeln!(output, "  j {jmp_tag}").unwrap();
             None
         }
 
-        _ => unimplemented!(),
+        ValueKind::Call(call) => {
+            for (i, &arg) in call.args().iter().enumerate() {
+                let reg = translate_value(arg, output, config);
+                if i < 8 {
+                    writeln!(output, "  mv a{i}, {reg}").unwrap();
+                } else {
+                    writeln!(output, "  sw {reg}, {}(sp)", (i - 8) * 4).unwrap();
+                }
+                config.table.reset(reg).unwrap();
+            }
+            let callee = call.callee();
+            let callee_data = config.program.func(callee);
+            let func_name = function_name(callee_data).unwrap();
+            writeln!(output, "  call {func_name}").unwrap();
+            Some("a0".parse().unwrap())
+        }
+
+        ValueKind::FuncArgRef(arg) => {
+            if arg.index() < 8 {
+                Some(Register::new(10 + arg.index() as u8).unwrap())
+            } else {
+                let offset = config.stack_size + (arg.index() - 8) * 4;
+                config.symbol.store_stack(value, offset as i32).unwrap();
+                return;
+            }
+        }
+
+        kind => unimplemented!("unimplemented ValueKind {kind:#?}"),
     };
 
-    if config.func_data.dfg().value(value).ty().is_unit() {
-        writeln!(output, "  # void type").unwrap();
-    } else {
+    if !config.func_data.dfg().value(value).ty().is_unit() {
         let reg = reg
             .ok_or(Error::InternalError(format!(
                 "{:#?} is non-void type",
@@ -223,10 +254,8 @@ fn translate_instruction(
             config.symbol.store_stack(value, *config.stack_pos).unwrap();
             config.table.reset(reg).unwrap();
             writeln!(output, "  sw {}, {}(sp)", reg, config.stack_pos).unwrap();
-            writeln!(output, "  # alloc at {}(sp)", config.stack_pos).unwrap();
             *config.stack_pos += 4;
         } else {
-            writeln!(output, "  # alloc at {}", reg).unwrap();
             config.symbol.store_register(value, reg).unwrap();
         }
     }
@@ -237,7 +266,8 @@ fn translate_value(
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
 ) -> Register {
-    writeln!(output, "  # Translate Value").unwrap();
+    // If value is already handled before, just return it directly.
+    // Note that we need to load variables on stack into register.
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
         Some(AllocPos::Stack(offset)) => {
@@ -250,4 +280,31 @@ fn translate_value(
             translate_value(value, output, config)
         }
     }
+}
+
+// Helper functions
+
+/// Get the name of a basic block, without leading '%'
+fn block_name(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
+    let name = func.dfg().bb(bb).name().as_ref();
+    let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
+    let name = name
+        .strip_prefix("%")
+        .ok_or(Error::InternalError(format!(
+            "invalid function name '{name}' generated in koopa, expected to begin with '%'"
+        )))?
+        .to_string();
+    Ok(name)
+}
+
+/// Get the name of a function, without leading '@'
+fn function_name(func_data: &FunctionData) -> Result<String, Error> {
+    Ok(func_data
+        .name()
+        .strip_prefix("@")
+        .ok_or(Error::InternalError(format!(
+            "invalid function name '{}' generated in koopa, expected to begin with '@'",
+            func_data.name()
+        )))?
+        .to_string())
 }

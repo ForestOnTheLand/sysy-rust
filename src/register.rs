@@ -6,7 +6,7 @@
 use crate::util::Error;
 use koopa::ir::Value;
 use std::collections::HashMap;
-use std::fmt;
+use std::{fmt, str};
 
 /// RISCV registers, with [`Register::id`] in 0~31 (32 in total)
 #[derive(Debug, Clone, Copy)]
@@ -45,8 +45,50 @@ impl fmt::Display for Register {
     }
 }
 
-/// temp registers that are allowed to use freely, namely t0~t6, a0~a7
-const TMP_REG: [u8; 15] = [5, 6, 7, 28, 29, 30, 31, 10, 11, 12, 13, 14, 15, 16, 17];
+impl str::FromStr for Register {
+    type Err = Error;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let id = match s {
+            "x0" => 0,
+            "ra" => 1,
+            "sp" => 2,
+            "gp" => 3,
+            "tp" => 4,
+            "t0" => 5,
+            "t1" => 6,
+            "t2" => 7,
+            "s0" => 8,
+            "s1" => 9,
+            "a0" => 10,
+            "a1" => 11,
+            "a2" => 12,
+            "a3" => 13,
+            "a4" => 14,
+            "a5" => 15,
+            "a6" => 16,
+            "a7" => 17,
+            "s2" => 18,
+            "s3" => 19,
+            "s4" => 20,
+            "s5" => 21,
+            "s6" => 22,
+            "s7" => 23,
+            "s8" => 24,
+            "s9" => 25,
+            "s10" => 26,
+            "s11" => 27,
+            "t3" => 28,
+            "t4" => 29,
+            "t5" => 30,
+            "t6" => 31,
+            _ => return Err(Error::InternalError(format!("Invalid register name '{s}'"))),
+        };
+        Ok(Register::new(id as u8).unwrap())
+    }
+}
+
+/// temp registers that are allowed to use freely, namely t0~t6
+const TMP_REG: [u8; 7] = [5, 6, 7, 28, 29, 30, 31];
 
 /// Record the state of registers (occupied or not)
 pub struct RegisterTable {
@@ -58,7 +100,7 @@ impl RegisterTable {
     pub fn new() -> RegisterTable {
         RegisterTable {
             state: [false; 32],
-            available: 15,
+            available: 7,
         }
     }
 
@@ -76,8 +118,8 @@ impl RegisterTable {
     }
 
     pub fn reset(&mut self, reg: Register) -> Result<(), Error> {
-        if reg.id == 0 {
-            // Operations onto x0 is ignored safely
+        if !TMP_REG.contains(&reg.id) {
+            // Operations onto non-temporary registers is ignored safely
             Ok(())
         } else if self.state[reg.id as usize] {
             self.state[reg.id as usize] = false;
@@ -90,6 +132,7 @@ impl RegisterTable {
         }
     }
 
+    #[allow(dead_code)]
     pub fn remain(&self) -> i32 {
         self.available
     }

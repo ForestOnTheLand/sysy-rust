@@ -22,11 +22,12 @@ pub fn output_program(program: &Program, output: impl io::Write) {
 pub fn build_program(comp_unit: &CompUnit) -> Program {
     let mut program = Program::new();
     let mut symtab = SymbolTable::new();
-    declare_builtins(&mut program, &mut symtab);
+    // declare_builtins(&mut program, &mut symtab);
     build_comp_unit(&mut program, comp_unit, &mut symtab);
     program
 }
 
+#[allow(dead_code)]
 fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     let builtin_functions: Vec<(String, Vec<Type>, Type)> = vec![
         // decl @getint(): i32
