@@ -11,6 +11,7 @@ pub enum Symbol {
 }
 
 /// Symbol table, supporting nested blocks
+#[derive(Debug)]
 pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,
     loops: Vec<(BasicBlock, BasicBlock)>,

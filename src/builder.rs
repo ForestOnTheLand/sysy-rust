@@ -69,51 +69,67 @@ pub fn build_program(comp_unit: &CompUnit) -> Program {
 fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     let builtin_functions: Vec<(String, Vec<Type>, Type)> = vec![
         // decl @getint(): i32
-        ("@getint".to_string(), vec![], Type::get_i32()),
+        ("getint".to_string(), vec![], Type::get_i32()),
         // decl @getch(): i32
-        ("@getch".to_string(), vec![], Type::get_i32()),
+        ("getch".to_string(), vec![], Type::get_i32()),
         // decl @getarray(*i32): i32
         (
-            "@getarray".to_string(),
+            "getarray".to_string(),
             vec![Type::get_pointer(Type::get_i32())],
             Type::get_i32(),
         ),
         // decl @putint(i32)
         (
-            "@putint".to_string(),
+            "putint".to_string(),
             vec![Type::get_i32()],
             Type::get_unit(),
         ),
         // decl @putch(i32)
-        (
-            "@putch".to_string(),
-            vec![Type::get_i32()],
-            Type::get_unit(),
-        ),
+        ("putch".to_string(), vec![Type::get_i32()], Type::get_unit()),
         // decl @putarray(i32, *i32)
         (
-            "@putarray".to_string(),
+            "putarray".to_string(),
             vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
             Type::get_unit(),
         ),
         // decl @starttime()
-        ("@starttime".to_string(), vec![], Type::get_unit()),
+        ("starttime".to_string(), vec![], Type::get_unit()),
         // decl @stoptime()
-        ("@stoptime".to_string(), vec![], Type::get_unit()),
+        ("stoptime".to_string(), vec![], Type::get_unit()),
     ];
     for (name, params_ty, ret_ty) in builtin_functions {
-        let data = FunctionData::new_decl(name, params_ty, ret_ty);
-        program.new_func(data);
+        let data = FunctionData::new_decl(format!("@{name}"), params_ty, ret_ty);
+        let function = program.new_func(data);
+        symtab.insert_function(name, function).unwrap();
     }
 }
 
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
     match comp_unit.item.as_ref() {
-        GlobalItem::Decl(decl) => unimplemented!(),
+        GlobalItem::Decl(decl) => match decl.as_ref() {
+            Decl::Const(decl) => build_const_decl(decl, symtab),
+            Decl::Var(decl) => build_global_var_decl(program, decl, symtab),
+        },
         GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
-    }
+    };
     if let Some(c) = &comp_unit.comp_unit {
         build_comp_unit(program, c, symtab);
+    }
+}
+
+fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut SymbolTable) {
+    for def in decl.var_defs.iter() {
+        let init = match &def.init_val {
+            None => program.new_value().zero_init(Type::get_i32()),
+            Some(init_val) => {
+                let val = compute_exp(&init_val.exp, symtab);
+                program.new_value().integer(val)
+            }
+        };
+        let value = program.new_value().global_alloc(init);
+        let name = format!("@{}", def.ident);
+        symtab.insert_var(&def.ident, value).unwrap();
+        program.set_value_name(value, Some(name));
     }
 }
 
@@ -169,6 +185,7 @@ fn parse_function(program: &mut Program, func_def: &FuncDef) -> (Function, Type)
 }
 
 fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
+    // return false;
     func.dfg()
         .bb(bb)
         .name()
@@ -443,9 +460,10 @@ fn build_stmt(
         }
         Stmt::Exp(exp) => {
             if let Some(exp) = exp {
-                build_exp(func, bb, exp, symtab);
+                build_exp(func, bb, exp, symtab).1
+            } else {
+                bb
             }
-            bb
         }
         Stmt::Block(block) => {
             let next_bb = build_block(func, bb, block, symtab);
@@ -732,7 +750,6 @@ fn build_land_exp(
             let and = new_bb!(func).basic_block(Some(format!("%and_{id}")));
             add_bb!(func, and);
             let end_and = new_bb!(func).basic_block(Some(format!("%endand_{id}")));
-            add_bb!(func, end_and);
 
             let branch = new_value!(func).branch(left, and, end_and);
             new_inst!(func, bb, branch);
@@ -746,6 +763,7 @@ fn build_land_exp(
             let jmp = new_value!(func).jump(end_and);
             new_inst!(func, bb, jmp);
 
+            add_bb!(func, end_and);
             let result = new_value!(func).load(result);
             new_inst!(func, end_and, result);
             (result, end_and)
@@ -783,7 +801,6 @@ fn build_lor_exp(
             let or = new_bb!(func).basic_block(Some(format!("%or_{id}")));
             add_bb!(func, or);
             let end_or = new_bb!(func).basic_block(Some(format!("%endor_{id}")));
-            add_bb!(func, end_or);
 
             let branch = new_value!(func).branch(left, end_or, or);
             new_inst!(func, bb, branch);
@@ -796,6 +813,7 @@ fn build_lor_exp(
             let jmp = new_value!(func).jump(end_or);
             new_inst!(func, bb, jmp);
 
+            add_bb!(func, end_or);
             let result = new_value!(func).load(result);
             new_inst!(func, end_or, result);
             (result, end_or)

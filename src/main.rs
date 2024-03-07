@@ -24,7 +24,7 @@ fn main() {
 
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
     let program = builder::build_program(&ast);
-
+    // println!("{:#?}", ast);
     match mode {
         util::Mode::Koopa => {
             builder::output_program(&program, output);
