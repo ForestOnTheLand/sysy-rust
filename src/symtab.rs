@@ -2,7 +2,10 @@
 
 use crate::util::Error;
 use koopa::ir::{BasicBlock, Function, Value};
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[derive(Debug, Clone, Copy)]
 pub enum Symbol {
@@ -16,6 +19,7 @@ pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,
     loops: Vec<(BasicBlock, BasicBlock)>,
     function: HashMap<String, Function>,
+    counter: AtomicUsize,
 }
 
 impl SymbolTable {
@@ -24,6 +28,7 @@ impl SymbolTable {
             data: vec![HashMap::new()],
             loops: Vec::new(),
             function: HashMap::new(),
+            counter: AtomicUsize::new(1000),
         }
     }
 
@@ -157,5 +162,9 @@ impl SymbolTable {
                 "invalid `break` instruction found".to_string(),
             ))?
             .1)
+    }
+
+    pub fn get_id(&self) -> usize {
+        self.counter.fetch_add(1, Ordering::Relaxed)
     }
 }

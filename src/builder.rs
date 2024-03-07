@@ -7,50 +7,11 @@ use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
 use std::io;
-use std::sync::atomic::{AtomicUsize, Ordering};
-
-// Global counter for if-else statements
-static CONDITION_COUNTER: AtomicUsize = AtomicUsize::new(1);
-static AND_COUNTER: AtomicUsize = AtomicUsize::new(1);
-static OR_COUNTER: AtomicUsize = AtomicUsize::new(1);
-static WHILE_COUNTER: AtomicUsize = AtomicUsize::new(1);
-static UNUSED_COUNTER: AtomicUsize = AtomicUsize::new(1);
-
-/// Add an instruction into a function.
-macro_rules! new_inst {
-    ($func:expr, $bb:expr, $inst:expr) => {
-        if !is_unused_block($func, $bb) {
-            $func
-                .layout_mut()
-                .bb_mut($bb)
-                .insts_mut()
-                .push_key_back($inst)
-                .unwrap()
-        }
-    };
-}
 
 /// Add a new value into a function.
 macro_rules! new_value {
     ($func:expr) => {
         $func.dfg_mut().new_value()
-    };
-}
-
-/// Add a new basic block into a function.
-macro_rules! new_bb {
-    ($func:expr) => {
-        $func.dfg_mut().new_bb()
-    };
-}
-
-macro_rules! add_bb {
-    ($func_data:expr, $entry:expr) => {
-        $func_data
-            .layout_mut()
-            .bbs_mut()
-            .push_key_back($entry)
-            .unwrap()
     };
 }
 
@@ -97,6 +58,7 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
         // decl @stoptime()
         ("stoptime".to_string(), vec![], Type::get_unit()),
     ];
+
     for (name, params_ty, ret_ty) in builtin_functions {
         let data = FunctionData::new_decl(format!("@{name}"), params_ty, ret_ty);
         let function = program.new_func(data);
@@ -141,8 +103,8 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
         .insert_function(func_def.ident.clone(), func)
         .unwrap();
 
-    let bb = new_bb!(func_data).basic_block(Some("%entry".into()));
-    add_bb!(func_data, bb);
+    let bb = new_bb(func_data, "%entry".into());
+    add_bb(func_data, bb);
 
     if let Some(params) = func_def.params.as_ref() {
         build_params(func_data, bb, params, symtab);
@@ -152,7 +114,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
     if !is_unused_block(func_data, bb) {
         if ret.is_unit() {
             let ret = new_value!(func_data).ret(None);
-            new_inst!(func_data, bb, ret);
+            add_value(func_data, bb, ret);
         } else {
             panic!(
                 "parse error: Expected a `return` instruction at the end of a non-void function '{}'",
@@ -184,16 +146,6 @@ fn parse_function(program: &mut Program, func_def: &FuncDef) -> (Function, Type)
     (program.new_func(f), ret_ty)
 }
 
-fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
-    // return false;
-    func.dfg()
-        .bb(bb)
-        .name()
-        .as_ref()
-        .expect("basic blocks should have a non-default name")
-        .starts_with("%unused")
-}
-
 fn build_params(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -205,9 +157,9 @@ fn build_params(
         let ident = format!("%{}_p", params.params[i].ident);
         let p = new_value!(func).alloc(Type::get_i32());
         func.dfg_mut().set_value_name(p, Some(ident.clone()));
-        new_inst!(func, bb, p);
+        add_value(func, bb, p);
         let store = new_value!(func).store(value, p);
-        new_inst!(func, bb, store);
+        add_value(func, bb, store);
         symtab.insert_var(&params.params[i].ident, p).unwrap();
     }
 }
@@ -279,12 +231,12 @@ fn build_var_def(
     let var = new_value!(func).alloc(Type::get_i32());
     func.dfg_mut()
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-    new_inst!(func, bb, var);
+    add_value(func, bb, var);
     symtab.insert_var(&def.ident, var).unwrap();
     if let Some(init_value) = &def.init_val {
         let (value, bb) = build_init_value(func, bb, &init_value, symtab);
         let store = new_value!(func).store(value, var);
-        new_inst!(func, bb, store);
+        add_value(func, bb, store);
         bb
     } else {
         bb
@@ -441,21 +393,21 @@ fn build_stmt(
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
             let store = new_value!(func).store(value, symtab.get_var(&lval.ident).unwrap());
-            new_inst!(func, bb, store);
+            add_value(func, bb, store);
             bb
         }
         Stmt::Return(exp) => {
             if let Some(exp) = exp {
                 let (ret_val, bb) = build_exp(func, bb, exp, symtab);
                 let ret = new_value!(func).ret(Some(ret_val));
-                new_inst!(func, bb, ret);
+                add_value(func, bb, ret);
             } else {
                 let ret = new_value!(func).ret(None);
-                new_inst!(func, bb, ret);
+                add_value(func, bb, ret);
             }
-            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
-            // add_bb!(func, end_bb);
+            let id = symtab.get_id();
+            let end_bb = new_bb(func, format!("%unused_{id}"));
+            // add_bb(func, end_bb);
             end_bb
         }
         Stmt::Exp(exp) => {
@@ -470,57 +422,57 @@ fn build_stmt(
             next_bb
         }
         Stmt::Condition(cond, true_branch, false_branch) => {
-            let id = CONDITION_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let id = symtab.get_id();
             let (cond, bb) = build_exp(func, bb, cond, symtab);
-            let end_bb = new_bb!(func).basic_block(Some(format!("%endif_{id}")));
+            let end_bb = new_bb(func, format!("%endif_{id}"));
 
-            let true_bb = new_bb!(func).basic_block(Some(format!("%then_{id}")));
-            add_bb!(func, true_bb);
+            let true_bb = new_bb(func, format!("%then_{id}"));
+            add_bb(func, true_bb);
             let true_end = build_stmt(func, true_bb, true_branch, symtab);
             let true_jmp = new_value!(func).jump(end_bb);
-            new_inst!(func, true_end, true_jmp);
+            add_value(func, true_end, true_jmp);
 
             let else_bb = {
                 if let Some(false_branch) = false_branch {
-                    let false_bb = new_bb!(func).basic_block(Some(format!("%else_{id}")));
-                    add_bb!(func, false_bb);
+                    let false_bb = new_bb(func, format!("%else_{id}"));
+                    add_bb(func, false_bb);
                     let false_end = build_stmt(func, false_bb, false_branch, symtab);
-                    add_bb!(func, end_bb);
+                    add_bb(func, end_bb);
                     let false_jmp = new_value!(func).jump(end_bb);
-                    new_inst!(func, false_end, false_jmp);
+                    add_value(func, false_end, false_jmp);
                     false_bb
                 } else {
-                    add_bb!(func, end_bb);
+                    add_bb(func, end_bb);
                     end_bb
                 }
             };
             let branch = new_value!(func).branch(cond, true_bb, else_bb);
-            new_inst!(func, bb, branch);
+            add_value(func, bb, branch);
             end_bb
         }
 
         Stmt::While(exp, stmt) => {
-            let id = WHILE_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let entry = new_bb!(func).basic_block(Some(format!("%while_entry_{id}")));
-            add_bb!(func, entry);
-            let end = new_bb!(func).basic_block(Some(format!("%while_end_{id}")));
+            let id = symtab.get_id();
+            let entry = new_bb(func, format!("%while_entry_{id}"));
+            add_bb(func, entry);
+            let end = new_bb(func, format!("%while_end_{id}"));
 
             symtab.enter_loop(entry, end);
 
             let enter = new_value!(func).jump(entry);
-            new_inst!(func, bb, enter);
+            add_value(func, bb, enter);
             let (cond, end_entry) = build_exp(func, entry, exp, symtab);
 
-            let body = new_bb!(func).basic_block(Some(format!("%while_body_{id}")));
-            add_bb!(func, body);
+            let body = new_bb(func, format!("%while_body_{id}"));
+            add_bb(func, body);
             let end_body = build_stmt(func, body, stmt, symtab);
             let jump = new_value!(func).jump(entry);
-            new_inst!(func, end_body, jump);
+            add_value(func, end_body, jump);
 
-            add_bb!(func, end);
+            add_bb(func, end);
 
             let branch = new_value!(func).branch(cond, body, end);
-            new_inst!(func, end_entry, branch);
+            add_value(func, end_entry, branch);
 
             symtab.quit_loop().unwrap();
 
@@ -528,20 +480,20 @@ fn build_stmt(
         }
 
         Stmt::Break => {
-            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let id = symtab.get_id();
             let target = symtab.loop_end().unwrap();
             let jump = new_value!(func).jump(target);
-            new_inst!(func, bb, jump);
-            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
+            add_value(func, bb, jump);
+            let end_bb = new_bb(func, format!("%unused_{id}"));
             end_bb
         }
 
         Stmt::Continue => {
-            let id = UNUSED_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let id = symtab.get_id();
             let target = symtab.loop_entry().unwrap();
             let jump = new_value!(func).jump(target);
-            new_inst!(func, bb, jump);
-            let end_bb = new_bb!(func).basic_block(Some(format!("%unused_{id}")));
+            add_value(func, bb, jump);
+            let end_bb = new_bb(func, format!("%unused_{id}"));
             end_bb
         }
     }
@@ -571,13 +523,13 @@ fn build_unary_exp(
                 UnaryOp::Neg => {
                     let zero = new_value!(func).integer(0);
                     let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
-                    new_inst!(func, bb, neg);
+                    add_value(func, bb, neg);
                     (neg, bb)
                 }
                 UnaryOp::Not => {
                     let zero = new_value!(func).integer(0);
                     let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
-                    new_inst!(func, bb, not);
+                    add_value(func, bb, not);
                     (not, bb)
                 }
             }
@@ -593,7 +545,7 @@ fn build_unary_exp(
                 }
             }
             let result = new_value!(func).call(symtab.get_function(ident).unwrap(), args);
-            new_inst!(func, bb, result);
+            add_value(func, bb, result);
             (result, bb)
         }
     }
@@ -612,7 +564,7 @@ fn build_primary_exp(
             Symbol::Const(val) => (new_value!(func).integer(val), bb),
             Symbol::Var(value) => {
                 let temp = new_value!(func).load(value);
-                new_inst!(func, bb, temp);
+                add_value(func, bb, temp);
                 (temp, bb)
             }
         },
@@ -639,7 +591,7 @@ fn build_mul_exp(
                 left,
                 right,
             );
-            new_inst!(func, bb, value);
+            add_value(func, bb, value);
             (value, bb)
         }
     }
@@ -664,7 +616,7 @@ fn build_add_exp(
                 left,
                 right,
             );
-            new_inst!(func, bb, value);
+            add_value(func, bb, value);
             (value, bb)
         }
     }
@@ -691,7 +643,7 @@ fn build_rel_exp(
                 left,
                 right,
             );
-            new_inst!(func, bb, value);
+            add_value(func, bb, value);
             (value, bb)
         }
     }
@@ -716,7 +668,7 @@ fn build_eq_exp(
                 left,
                 right,
             );
-            new_inst!(func, bb, value);
+            add_value(func, bb, value);
             (value, bb)
         }
     }
@@ -739,33 +691,33 @@ fn build_land_exp(
         LAndExp::Single(exp) => build_eq_exp(func, bb, exp, symtab),
         LAndExp::Binary(left, right) => {
             let result = new_value!(func).alloc(Type::get_i32());
-            new_inst!(func, bb, result);
+            add_value(func, bb, result);
             let zero = new_value!(func).integer(0);
             let assign = new_value!(func).store(zero, result);
-            new_inst!(func, bb, assign);
+            add_value(func, bb, assign);
 
             let (left, bb) = build_land_exp(func, bb, left, symtab);
 
-            let id = AND_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let and = new_bb!(func).basic_block(Some(format!("%and_{id}")));
-            add_bb!(func, and);
-            let end_and = new_bb!(func).basic_block(Some(format!("%endand_{id}")));
+            let id = symtab.get_id();
+            let and = new_bb(func, format!("%and_{id}"));
+            add_bb(func, and);
+            let end_and = new_bb(func, format!("%endand_{id}"));
 
             let branch = new_value!(func).branch(left, and, end_and);
-            new_inst!(func, bb, branch);
+            add_value(func, bb, branch);
 
             let (right, bb) = build_eq_exp(func, and, right, symtab);
             let zero = new_value!(func).integer(0);
             let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-            new_inst!(func, bb, right);
+            add_value(func, bb, right);
             let assign = new_value!(func).store(right, result);
-            new_inst!(func, bb, assign);
+            add_value(func, bb, assign);
             let jmp = new_value!(func).jump(end_and);
-            new_inst!(func, bb, jmp);
+            add_value(func, bb, jmp);
 
-            add_bb!(func, end_and);
+            add_bb(func, end_and);
             let result = new_value!(func).load(result);
-            new_inst!(func, end_and, result);
+            add_value(func, end_and, result);
             (result, end_and)
         }
     }
@@ -791,32 +743,64 @@ fn build_lor_exp(
             let one = new_value!(func).integer(1);
 
             let result = new_value!(func).alloc(Type::get_i32());
-            new_inst!(func, bb, result);
+            add_value(func, bb, result);
             let assign = new_value!(func).store(one, result);
-            new_inst!(func, bb, assign);
+            add_value(func, bb, assign);
 
             let (left, bb) = build_lor_exp(func, bb, left, symtab);
 
-            let id = OR_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let or = new_bb!(func).basic_block(Some(format!("%or_{id}")));
-            add_bb!(func, or);
-            let end_or = new_bb!(func).basic_block(Some(format!("%endor_{id}")));
+            let id = symtab.get_id();
+            let or = new_bb(func, format!("%or_{id}"));
+            add_bb(func, or);
+            let end_or = new_bb(func, format!("%endor_{id}"));
 
             let branch = new_value!(func).branch(left, end_or, or);
-            new_inst!(func, bb, branch);
+            add_value(func, bb, branch);
 
             let (right, bb) = build_land_exp(func, or, right, symtab);
             let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-            new_inst!(func, bb, right);
+            add_value(func, bb, right);
             let assign = new_value!(func).store(right, result);
-            new_inst!(func, bb, assign);
+            add_value(func, bb, assign);
             let jmp = new_value!(func).jump(end_or);
-            new_inst!(func, bb, jmp);
+            add_value(func, bb, jmp);
 
-            add_bb!(func, end_or);
+            add_bb(func, end_or);
             let result = new_value!(func).load(result);
-            new_inst!(func, end_or, result);
+            add_value(func, end_or, result);
             (result, end_or)
         }
     }
+}
+
+// Helper functions
+
+/// Judge whether a block is marked with unused
+fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
+    func.dfg()
+        .bb(bb)
+        .name()
+        .as_ref()
+        .expect("basic blocks should have a non-default name")
+        .starts_with("%unused")
+}
+
+/// Add a new instruction into a basic block.
+fn add_value(func: &mut FunctionData, bb: BasicBlock, inst: Value) {
+    if !is_unused_block(func, bb) {
+        func.layout_mut()
+            .bb_mut(bb)
+            .insts_mut()
+            .push_key_back(inst)
+            .unwrap()
+    }
+}
+
+/// Add a new basic block into a function.
+fn add_bb(func: &mut FunctionData, bb: BasicBlock) {
+    func.layout_mut().bbs_mut().push_key_back(bb).unwrap()
+}
+
+fn new_bb(func: &mut FunctionData, name: String) -> BasicBlock {
+    func.dfg_mut().new_bb().basic_block(Some(name))
 }
