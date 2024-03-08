@@ -29,6 +29,15 @@ pub fn translate_program(program: &Program, output: &mut impl io::Write) {
     }
 }
 
+/// Parsing global variables. For example:
+///
+/// ```riscv
+///   .data
+///   .globl x
+/// x:
+///   .zero 4
+/// ```
+///
 fn translate_global_value(program: &Program, value: Value, output: &mut impl io::Write) {
     let value_data = program.borrow_value(value);
     let name = global_variable_name(&value_data).unwrap();
@@ -52,6 +61,16 @@ fn translate_global_value(program: &Program, value: Value, output: &mut impl io:
     writeln!(output, "").unwrap();
 }
 
+/// Parsing function definitions, with declarations ignored.
+/// For example:
+///
+/// ```riscv
+///   .text
+///   .globl main
+/// main:
+///   ret
+/// ```
+///
 fn translate_function(program: &Program, func_data: &FunctionData, output: &mut impl io::Write) {
     // Ignore function declarations
     if func_data.layout().entry_bb() == None {
@@ -132,8 +151,7 @@ struct TranslateConfig<'a> {
     stack_pos: Box<i32>,
 }
 
-/// Note that `sizeof(Value) = 0x4`, so instead of borrowing it,
-/// I choose to pass it by copying directly.
+/// Translate a single KoopaIR instruction into several RISCV instructions.
 fn translate_instruction(
     value: Value,
     output: &mut impl io::Write,
@@ -312,6 +330,7 @@ fn translate_instruction(
     }
 }
 
+/// Translate an `i32` value. Store it in a register, and returns its position.
 fn translate_i32(
     value: Value,
     output: &mut impl io::Write,
