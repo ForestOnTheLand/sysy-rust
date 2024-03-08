@@ -17,11 +17,9 @@ use std::{cmp::max, io};
 /// When encountering invalid KoopaIR program or unimplemented functions
 ///
 pub fn translate_program(program: &Program, output: &mut impl io::Write) {
-    let mut global_variable = AllocTable::new();
-
     // Global variables
     for &value in program.inst_layout() {
-        translate_global_value(program, value, output, &mut global_variable);
+        translate_global_value(program, value, output);
     }
 
     // Functions
@@ -31,12 +29,7 @@ pub fn translate_program(program: &Program, output: &mut impl io::Write) {
     }
 }
 
-fn translate_global_value(
-    program: &Program,
-    value: Value,
-    output: &mut impl io::Write,
-    table: &mut AllocTable,
-) {
+fn translate_global_value(program: &Program, value: Value, output: &mut impl io::Write) {
     let value_data = program.borrow_value(value);
     let name = global_variable_name(&value_data).unwrap();
     writeln!(output, "  .data").unwrap();

@@ -161,6 +161,7 @@ impl AllocTable {
         self.data.get(value)
     }
 
+    #[allow(dead_code)]
     pub fn get_stack(&self, value: &Value) -> Option<i32> {
         match self.data.get(value) {
             Some(AllocPos::Stack(offset)) => Some(*offset),

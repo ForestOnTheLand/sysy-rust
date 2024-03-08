@@ -1,5 +1,13 @@
+# Cargo
 /target
 Cargo.lock
+
+# My test
 /test
 /out
+
+# VSCode configuration
 /.vscode
+
+# Temporary file
+/tmp.*
