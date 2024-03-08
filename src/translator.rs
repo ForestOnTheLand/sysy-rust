@@ -4,7 +4,9 @@
 
 use crate::register::*;
 use crate::util::Error;
-use koopa::ir::{BasicBlock, BinaryOp, FunctionData, Program, Value, ValueKind};
+use koopa::ir::{
+    entities::ValueData, BasicBlock, BinaryOp, FunctionData, Program, Value, ValueKind,
+};
 use std::{cmp::max, io};
 
 /// The core part of this module. Translate a KoopaIR program `program` into RISCV
@@ -15,8 +17,12 @@ use std::{cmp::max, io};
 /// When encountering invalid KoopaIR program or unimplemented functions
 ///
 pub fn translate_program(program: &Program, output: &mut impl io::Write) {
+    let mut global_variable = AllocTable::new();
+
     // Global variables
-    // TODO
+    for &value in program.inst_layout() {
+        translate_global_value(program, value, output, &mut global_variable);
+    }
 
     // Functions
     for &func in program.func_layout() {
@@ -25,7 +31,40 @@ pub fn translate_program(program: &Program, output: &mut impl io::Write) {
     }
 }
 
+fn translate_global_value(
+    program: &Program,
+    value: Value,
+    output: &mut impl io::Write,
+    table: &mut AllocTable,
+) {
+    let value_data = program.borrow_value(value);
+    let name = global_variable_name(&value_data).unwrap();
+    writeln!(output, "  .data").unwrap();
+    writeln!(output, "  .globl {}\n{}:", name, name).unwrap();
+
+    match value_data.kind() {
+        ValueKind::GlobalAlloc(alloc) => {
+            let init_data = program.borrow_value(alloc.init());
+            let size = init_data.ty().size();
+            match init_data.kind() {
+                ValueKind::ZeroInit(_) => writeln!(output, "  .zero {}", size),
+                ValueKind::Integer(i) => writeln!(output, "  .word {}", i.value()),
+                _ => unimplemented!(),
+            }
+            .unwrap();
+        }
+        _ => panic!("internal error: expected global alloc instruction"),
+    }
+
+    writeln!(output, "").unwrap();
+}
+
 fn translate_function(program: &Program, func_data: &FunctionData, output: &mut impl io::Write) {
+    // Ignore function declarations
+    if func_data.layout().entry_bb() == None {
+        return;
+    }
+
     writeln!(output, "  .text").unwrap();
     let func_name = function_name(func_data).unwrap();
     writeln!(output, "  .globl {}\n{}:", func_name, func_name).unwrap();
@@ -123,7 +162,7 @@ fn translate_instruction(
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
-                    let reg = translate_value(val, output, config);
+                    let reg = translate_i32(val, output, config);
                     if reg.id != 10 {
                         writeln!(output, "  mv a0, {}", reg).unwrap();
                     }
@@ -141,8 +180,8 @@ fn translate_instruction(
         }
 
         ValueKind::Binary(bin) => {
-            let left = translate_value(bin.lhs(), output, config);
-            let right = translate_value(bin.rhs(), output, config);
+            let left = translate_i32(bin.lhs(), output, config);
+            let right = translate_i32(bin.rhs(), output, config);
             config.table.reset(left).unwrap();
             config.table.reset(right).unwrap();
             let res = config.table.get_vaccant().unwrap();
@@ -174,15 +213,27 @@ fn translate_instruction(
 
         ValueKind::Alloc(_alloc) => {
             writeln!(output, "  # Allocated at {}(sp)", *config.stack_pos).unwrap();
-            config.symbol.store_stack(value, *config.stack_pos).unwrap();
+            config
+                .symbol
+                .store_stack_pointer(value, *config.stack_pos)
+                .unwrap();
             *config.stack_pos += 4;
             return;
         }
 
         ValueKind::Store(store) => {
-            let reg = translate_value(store.value(), output, config);
-            let pos = config.symbol.get_stack(&store.dest()).unwrap();
-            writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+            let reg = translate_i32(store.value(), output, config);
+            if store.dest().is_global() {
+                let value_data = config.program.borrow_value(store.dest());
+                let name = global_variable_name(&value_data).unwrap();
+                let tmp = config.table.get_vaccant().unwrap();
+                writeln!(output, "  la {tmp}, {name}").unwrap();
+                writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
+                config.table.reset(tmp).unwrap();
+            } else {
+                let pos = config.symbol.get_stack_pointer(&store.dest()).unwrap();
+                writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+            }
             config.table.reset(reg).unwrap();
 
             None
@@ -190,14 +241,21 @@ fn translate_instruction(
 
         ValueKind::Load(load) => {
             let reg = config.table.get_vaccant().unwrap();
-            let pos = config.symbol.get_stack(&load.src()).unwrap();
-            writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
+            if load.src().is_global() {
+                let value_data = config.program.borrow_value(load.src());
+                let name = global_variable_name(&value_data).unwrap();
+                writeln!(output, "  la {reg}, {name}").unwrap();
+                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
+            } else {
+                let pos = config.symbol.get_stack_pointer(&load.src()).unwrap();
+                writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
+            }
 
             Some(reg)
         }
 
         ValueKind::Branch(branch) => {
-            let cond = translate_value(branch.cond(), output, config);
+            let cond = translate_i32(branch.cond(), output, config);
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
             writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
@@ -214,7 +272,7 @@ fn translate_instruction(
 
         ValueKind::Call(call) => {
             for (i, &arg) in call.args().iter().enumerate() {
-                let reg = translate_value(arg, output, config);
+                let reg = translate_i32(arg, output, config);
                 if i < 8 {
                     writeln!(output, "  mv a{i}, {reg}").unwrap();
                 } else {
@@ -261,13 +319,20 @@ fn translate_instruction(
     }
 }
 
-fn translate_value(
+fn translate_i32(
     value: Value,
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
 ) -> Register {
     // If value is already handled before, just return it directly.
     // Note that we need to load variables on stack into register.
+    let value_data = config.func_data.dfg().value(value);
+    if !value_data.ty().is_i32() {
+        panic!(
+            "internal error: type {} cannot be parsed as i32",
+            value_data.ty()
+        );
+    }
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
         Some(AllocPos::Stack(offset)) => {
@@ -275,9 +340,10 @@ fn translate_value(
             writeln!(output, "  lw {reg}, {offset}(sp)").unwrap();
             reg
         }
+        Some(AllocPos::StackPointer(_)) => panic!("internal error: *i32 cannot be parsed as i32"),
         None => {
             translate_instruction(value, output, config, false);
-            translate_value(value, output, config)
+            translate_i32(value, output, config)
         }
     }
 }
@@ -305,6 +371,23 @@ fn function_name(func_data: &FunctionData) -> Result<String, Error> {
         .ok_or(Error::InternalError(format!(
             "invalid function name '{}' generated in koopa, expected to begin with '@'",
             func_data.name()
+        )))?
+        .to_string())
+}
+
+/// Get the name of a global variable, without leading '@'
+fn global_variable_name(value_data: &ValueData) -> Result<String, Error> {
+    let name = value_data
+        .name()
+        .as_ref()
+        .ok_or(Error::InternalError(format!(
+            "missing global variable name in koopa"
+        )))?;
+    Ok(name
+        .strip_prefix("@")
+        .ok_or(Error::InternalError(format!(
+            "invalid function name '{}' generated in koopa, expected to begin with '@'",
+            name
         )))?
         .to_string())
 }

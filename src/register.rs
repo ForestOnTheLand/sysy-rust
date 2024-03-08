@@ -140,8 +140,9 @@ impl RegisterTable {
 
 /// Record the position (register or stack) of a single variable.
 pub enum AllocPos {
-    Reg(Register),
-    Stack(i32),
+    Reg(Register),     // i32, stored at `register`
+    Stack(i32),        // i32, stored at `offset`(sp)
+    StackPointer(i32), // *i32, pointing at `offset`(sp)
 }
 
 /// Record the position (register or stack) of all variables in a function.
@@ -167,6 +168,13 @@ impl AllocTable {
         }
     }
 
+    pub fn get_stack_pointer(&self, value: &Value) -> Option<i32> {
+        match self.data.get(value) {
+            Some(AllocPos::StackPointer(offset)) => Some(*offset),
+            _ => None,
+        }
+    }
+
     pub fn store_register(&mut self, value: Value, reg: Register) -> Result<(), Error> {
         match self.data.insert(value, AllocPos::Reg(reg)) {
             None => Ok(()),
@@ -180,7 +188,16 @@ impl AllocTable {
         match self.data.insert(value, AllocPos::Stack(offset)) {
             None => Ok(()),
             Some(_) => Err(Error::InternalError(
-                "value stored in stack before".to_string(),
+                "variable stored in stack before".to_string(),
+            )),
+        }
+    }
+
+    pub fn store_stack_pointer(&mut self, value: Value, offset: i32) -> Result<(), Error> {
+        match self.data.insert(value, AllocPos::StackPointer(offset)) {
+            None => Ok(()),
+            Some(_) => Err(Error::InternalError(
+                "pointer stored in stack before".to_string(),
             )),
         }
     }
