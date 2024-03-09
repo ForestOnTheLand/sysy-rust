@@ -88,25 +88,33 @@ Decl: Box<Decl> = {
 }
 // VarDecl ::= BuiltinType VarDef {"," VarDef} ";";
 VarDecl: Box<VarDecl> = <btype: BuiltinType> <var_defs: Comma<VarDef>> ";" => Box::new(VarDecl { <> });
-// VarDef ::= IDENT | IDENT "=" InitVal;
+// VarDef ::= IDENT ["[" ConstExp "]"] | IDENT ["[" ConstExp "]"] "=" InitVal;
 VarDef: Box<VarDef> = {
-    <ident: Ident> => Box::new(VarDef {ident, init_val: None} ),
-    <ident: Ident> "=" <init_val: InitVal> => Box::new(VarDef {ident, init_val: Some(init_val)} ),
+    <ident: Ident> <shape: ("[" <ConstExp> "]")?> => Box::new(VarDef {ident, shape, init_val: None} ),
+    <ident: Ident> <shape: ("[" <ConstExp> "]")?> "=" <init_val: InitVal> => Box::new(VarDef {ident, shape, init_val: Some(init_val)} ),
 }
-// InitVal ::= Exp;
-InitVal: Box<InitVal> = <exp: Exp> => Box::new(InitVal { <> });
+// InitVal ::= Exp | "{" [Exp {"," Exp}] "}";
+InitVal: Box<InitVal> = {
+    <Exp> => Box::new(InitVal::Single( <> )),
+    "{" <exp: (<Comma<Exp>>)?> "}" => Box::new(InitVal::Array( exp.unwrap_or(Vec::new()) )),
+}
 
 // ConstDecl ::= "const" BuiltinType ConstDef {"," ConstDef} ";";
 ConstDecl: Box<ConstDecl> = "const" <btype: BuiltinType> <const_defs: Comma<ConstDef>> ";" => Box::new(ConstDecl { <> });
-// BuiltinType ::= "int";
-// BuiltinType: BuiltinType = "int" => BuiltinType::Int;
-// ConstDef ::= IDENT "=" ConstInitVal;
-ConstDef: Box<ConstDef> = <ident: Ident> "=" <const_init_val: ConstInitVal> => Box::new(ConstDef { <> });
-// ConstInitVal ::= ConstExp;
-ConstInitVal: Box<ConstInitVal> = <const_exp: ConstExp> => Box::new(ConstInitVal { <> });
 
-// LVal ::= IDENT;
-LVal: LVal = <ident: Ident> => LVal { <> };
+// ConstDef ::= IDENT ["[" ConstExp "]"] "=" ConstInitVal;
+ConstDef: Box<ConstDef> = <ident: Ident> <shape: ("[" <ConstExp> "]")?> "=" <const_init_val: ConstInitVal> => Box::new(ConstDef { <> });
+// ConstInitVal ::= ConstExp | "{" [ConstExp {"," ConstExp}] "}";
+ConstInitVal: Box<ConstInitVal> = {
+    <const_exp: ConstExp> => Box::new(ConstInitVal::Single( <> )),
+    "{" <exps: (<Comma<ConstExp>>)?> "}" => Box::new(ConstInitVal::Array( exps.unwrap_or(Vec::new()) )),
+}
+
+// LVal ::= IDENT ["[" Exp "]"];
+LVal: LVal = {
+    <Ident> => LVal::Var( <> ),
+    <Ident> <("[" <Exp> "]")> => LVal::Index( <> ),
+}
 
 // ConstExp ::= Exp;
 ConstExp: Box<ConstExp> = <exp: Exp> => Box::new(ConstExp { <> });
@@ -182,8 +190,6 @@ LOrExp: Box<LOrExp> = {
     LAndExp => Box::new(LOrExp::Single( <> )),
     <LOrExp> "||" <LAndExp> => Box::new(LOrExp::Binary( <> )),
 }
-
-
 
 Number: i32 = <num: IntConst> => <>;
 

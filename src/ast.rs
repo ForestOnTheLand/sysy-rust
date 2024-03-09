@@ -9,7 +9,7 @@
 //!
 
 /// [`BuiltinType`] `::=` `"void"` | `"int"`
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum BuiltinType {
     Void,
     Int,
@@ -37,7 +37,7 @@ pub struct FuncDef {
     pub block: Block,
 }
 
-/// [`FuncFParams`] ::= [`FuncFParam`] {"," [`FuncFParam`]}
+/// [`FuncFParams`] ::= [`FuncFParam`] {`","` [`FuncFParam`]}
 #[derive(Debug)]
 pub struct FuncFParams {
     pub params: Vec<FuncFParam>,
@@ -97,16 +97,20 @@ pub struct VarDecl {
     pub var_defs: Vec<Box<VarDef>>,
 }
 
-/// [`VarDef`] `::=` `IDENT` | `IDENT` `"="` [`InitVal`]
+/// [`VarDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`]
+///               | `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`InitVal`]
 #[derive(Debug)]
 pub struct VarDef {
     pub ident: String,
+    pub shape: Option<Box<ConstExp>>,
     pub init_val: Option<Box<InitVal>>,
 }
-/// [`InitVal`] `::=` [`Exp`]
+
+/// [`InitVal`] `::=` [`Exp`] | `"{"` [[`Exp`] {`","` [`Exp`]}] `"}"`
 #[derive(Debug)]
-pub struct InitVal {
-    pub exp: Box<Exp>,
+pub enum InitVal {
+    Single(Box<Exp>),
+    Array(Vec<Box<Exp>>),
 }
 
 /// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
@@ -121,23 +125,26 @@ pub struct ConstDecl {
 //     Int,
 // }
 
-/// [`ConstDef`] `::=` `IDENT` `"="` [`ConstInitVal`]
+/// [`ConstDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`ConstInitVal`]
 #[derive(Debug)]
 pub struct ConstDef {
     pub ident: String,
+    pub shape: Option<Box<ConstExp>>,
     pub const_init_val: Box<ConstInitVal>,
 }
 
-/// [`ConstInitVal`] `::=` [`ConstExp`]
+/// [`ConstInitVal`] `::=` [`ConstExp`] | "{" [[`ConstExp`] {"," [`ConstExp`]}] "}"
 #[derive(Debug)]
-pub struct ConstInitVal {
-    pub const_exp: Box<ConstExp>,
+pub enum ConstInitVal {
+    Single(Box<ConstExp>),
+    Array(Vec<Box<ConstExp>>),
 }
 
-/// [`LVal`] `::=` `IDENT`
+/// [`LVal`] `::=` `IDENT` [`"["` [`Exp`] `"]"`]
 #[derive(Debug)]
-pub struct LVal {
-    pub ident: String,
+pub enum LVal {
+    Var(String),
+    Index(String, Box<Exp>),
 }
 
 /// [`ConstExp`] `::=` [`Exp`]

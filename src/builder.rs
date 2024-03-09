@@ -6,6 +6,7 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
+use core::panic;
 use std::io;
 
 /// Add a new value into a function.
@@ -69,7 +70,7 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
     match comp_unit.item.as_ref() {
         GlobalItem::Decl(decl) => match decl.as_ref() {
-            Decl::Const(decl) => build_const_decl(decl, symtab),
+            Decl::Const(decl) => build_global_const_decl(program, decl, symtab),
             Decl::Var(decl) => build_global_var_decl(program, decl, symtab),
         },
         GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
@@ -79,14 +80,50 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
     }
 }
 
+fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut SymbolTable) {
+    for def in decl.const_defs.iter() {
+        build_global_const_def(program, def, symtab);
+    }
+}
+
+fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
+    match &def.shape {
+        None => {
+            let value = compute_init_i32_value(&def.const_init_val, symtab);
+            symtab.insert_const(&def.ident, value).unwrap();
+        }
+        Some(shape) => {
+            let len = compute_exp(&shape.exp, symtab) as usize;
+            let values = compute_init_array_value(&def.const_init_val, len, symtab)
+                .iter()
+                .map(|&i| program.new_value().integer(i))
+                .collect();
+            let value = program.new_value().aggregate(values);
+            let array = program.new_value().global_alloc(value);
+            program.set_value_name(array, Some(format!("@{}", def.ident)));
+            symtab.insert_var(&def.ident, array).unwrap();
+        }
+    }
+}
+
 fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut SymbolTable) {
+    assert_eq!(decl.btype, BuiltinType::Int);
     for def in decl.var_defs.iter() {
         let init = match &def.init_val {
             None => program.new_value().zero_init(Type::get_i32()),
-            Some(init_val) => {
-                let val = compute_exp(&init_val.exp, symtab);
-                program.new_value().integer(val)
-            }
+            Some(init_val) => match init_val.as_ref() {
+                InitVal::Single(exp) => {
+                    let val = compute_exp(exp, symtab);
+                    program.new_value().integer(val)
+                }
+                InitVal::Array(exps) => {
+                    let elems = exps
+                        .iter()
+                        .map(|exp| program.new_value().integer(compute_exp(exp, symtab)))
+                        .collect();
+                    program.new_value().aggregate(elems)
+                }
+            },
         };
         let value = program.new_value().global_alloc(init);
         let name = format!("@{}", def.ident);
@@ -199,7 +236,7 @@ fn build_decl(
 ) -> BasicBlock {
     match decl {
         Decl::Const(decl) => {
-            build_const_decl(decl, symtab);
+            build_const_decl(func, bb, decl, symtab);
             bb
         }
         Decl::Var(decl) => build_var_decl(func, bb, decl, symtab),
@@ -228,43 +265,141 @@ fn build_var_def(
     if is_unused_block(func, bb) {
         return bb;
     }
-    let var = new_value!(func).alloc(Type::get_i32());
-    func.dfg_mut()
-        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-    add_value(func, bb, var);
-    symtab.insert_var(&def.ident, var).unwrap();
-    if let Some(init_value) = &def.init_val {
-        let (value, bb) = build_init_value(func, bb, &init_value, symtab);
-        let store = new_value!(func).store(value, var);
-        add_value(func, bb, store);
-        bb
-    } else {
-        bb
+
+    match &def.shape {
+        None => {
+            let var = new_value!(func).alloc(Type::get_i32());
+            func.dfg_mut()
+                .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+            add_value(func, bb, var);
+            symtab.insert_var(&def.ident, var).unwrap();
+            if let Some(init_value) = &def.init_val {
+                let (value, bb) = build_init_i32_value(func, bb, &init_value, symtab);
+                let store = new_value!(func).store(value, var);
+                add_value(func, bb, store);
+                bb
+            } else {
+                bb
+            }
+        }
+        Some(shape) => {
+            let len = compute_exp(&shape.exp, symtab) as usize;
+            let var = new_value!(func).alloc(Type::get_array(Type::get_i32(), len));
+            func.dfg_mut()
+                .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+            add_value(func, bb, var);
+            symtab.insert_var(&def.ident, var).unwrap();
+            if let Some(init_value) = &def.init_val {
+                let (value, bb) = build_init_array_value(func, bb, &init_value, len, symtab);
+                let store = new_value!(func).store(value, var);
+                add_value(func, bb, store);
+                bb
+            } else {
+                bb
+            }
+        }
     }
 }
 
-fn build_init_value(
+fn build_init_i32_value(
     func: &mut FunctionData,
     bb: BasicBlock,
     val: &InitVal,
     symtab: &mut SymbolTable,
 ) -> (Value, BasicBlock) {
-    build_exp(func, bb, &val.exp, symtab)
-}
-
-fn build_const_decl(decl: &ConstDecl, symtab: &mut SymbolTable) {
-    for def in decl.const_defs.iter() {
-        build_const_def(def, symtab);
+    match val {
+        InitVal::Single(exp) => build_exp(func, bb, exp, symtab),
+        InitVal::Array(_) => panic!("parse error: expected array, given i32"),
     }
 }
 
-fn build_const_def(decl: &ConstDef, symtab: &mut SymbolTable) {
-    let value = compute_init_value(&decl.const_init_val, symtab);
-    symtab.insert_const(&decl.ident, value).unwrap();
+fn build_init_array_value(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    val: &InitVal,
+    shape: usize,
+    symtab: &mut SymbolTable,
+) -> (Value, BasicBlock) {
+    match val {
+        InitVal::Single(_) => panic!("parse error: expected i32, given array"),
+        InitVal::Array(exps) => {
+            if exps.len() > shape {
+                panic!("parse error: cannot initialize an array of length {} with an array of length {}", shape, exps.len());
+            }
+            let mut bb = bb;
+            let mut init_list = Vec::new();
+            for exp in exps.iter() {
+                let (value, next_bb) = build_exp(func, bb, exp, symtab);
+                bb = next_bb;
+                init_list.push(value);
+            }
+            init_list.resize_with(shape, || new_value!(func).integer(0));
+            let list = new_value!(func).aggregate(init_list);
+            (list, bb)
+        }
+    }
 }
 
-fn compute_init_value(init: &ConstInitVal, symtab: &SymbolTable) -> i32 {
-    compute_exp(&init.const_exp.exp, symtab)
+fn build_const_decl(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    decl: &ConstDecl,
+    symtab: &mut SymbolTable,
+) {
+    for def in decl.const_defs.iter() {
+        build_const_def(func, bb, def, symtab);
+    }
+}
+
+fn build_const_def(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    decl: &ConstDef,
+    symtab: &mut SymbolTable,
+) {
+    match &decl.shape {
+        None => {
+            let value = compute_init_i32_value(&decl.const_init_val, symtab);
+            symtab.insert_const(&decl.ident, value).unwrap();
+        }
+        Some(shape) => {
+            let len = compute_exp(&shape.exp, symtab) as usize;
+            let values = compute_init_array_value(&decl.const_init_val, len, symtab)
+                .iter()
+                .map(|&i| new_value!(func).integer(i))
+                .collect();
+            let value = new_value!(func).aggregate(values);
+            let array = new_value!(func).alloc(Type::get_array(Type::get_i32(), len));
+            add_value(func, bb, array);
+            let store = new_value!(func).store(value, array);
+            add_value(func, bb, store);
+            symtab.insert_var(&decl.ident, array).unwrap();
+        }
+    }
+}
+
+fn compute_init_i32_value(init: &ConstInitVal, symtab: &SymbolTable) -> i32 {
+    match init {
+        ConstInitVal::Single(exp) => compute_exp(&exp.exp, symtab),
+        ConstInitVal::Array(_) => unreachable!("cannot initialize i32 with i32[]"),
+    }
+}
+
+fn compute_init_array_value(init: &ConstInitVal, shape: usize, symtab: &SymbolTable) -> Vec<i32> {
+    match init {
+        ConstInitVal::Single(_) => unreachable!("cannot initialize i32[] with i32"),
+        ConstInitVal::Array(exps) => {
+            if exps.len() > shape {
+                panic!("parse error: cannot initialize an array of length {} with an array of length {}", shape, exps.len());
+            }
+            let mut values: Vec<i32> = exps
+                .iter()
+                .map(|exp| compute_exp(&exp.exp, symtab))
+                .collect();
+            values.resize_with(shape, || 0);
+            values
+        }
+    }
 }
 
 fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
@@ -279,7 +414,7 @@ fn compute_unary_exp(exp: &UnaryExp, symtab: &SymbolTable) -> i32 {
             match op {
                 UnaryOp::Pos => val,
                 UnaryOp::Neg => -val,
-                UnaryOp::Not => !val,
+                UnaryOp::Not => (val == 0) as i32,
             }
         }
         UnaryExp::Call(_, _) => {
@@ -292,7 +427,10 @@ fn compute_primary_exp(exp: &PrimaryExp, symtab: &SymbolTable) -> i32 {
     match exp {
         PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
         PrimaryExp::Number(val) => *val,
-        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident).unwrap(),
+        PrimaryExp::LVal(lval) => match lval {
+            LVal::Var(ident) => symtab.get_const(ident).unwrap(),
+            LVal::Index(_, _) => panic!("cannot evaluate array at compile time"),
+        },
     }
 }
 
@@ -392,10 +530,24 @@ fn build_stmt(
     match stmt {
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
-            let store = new_value!(func).store(value, symtab.get_var(&lval.ident).unwrap());
-            add_value(func, bb, store);
-            bb
+            match lval {
+                LVal::Var(ident) => {
+                    let store = new_value!(func).store(value, symtab.get_var(ident).unwrap());
+                    add_value(func, bb, store);
+                    bb
+                }
+                LVal::Index(ident, index) => {
+                    let array = symtab.get_var(ident).unwrap();
+                    let (index, bb) = build_exp(func, bb, index, symtab);
+                    let pointer = new_value!(func).get_elem_ptr(array, index);
+                    add_value(func, bb, pointer);
+                    let store = new_value!(func).store(value, pointer);
+                    add_value(func, bb, store);
+                    bb
+                }
+            }
         }
+
         Stmt::Return(exp) => {
             if let Some(exp) = exp {
                 let (ret_val, bb) = build_exp(func, bb, exp, symtab);
@@ -560,13 +712,26 @@ fn build_primary_exp(
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
-        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident).unwrap() {
-            Symbol::Const(val) => (new_value!(func).integer(val), bb),
-            Symbol::Var(value) => {
-                let temp = new_value!(func).load(value);
-                add_value(func, bb, temp);
-                (temp, bb)
-            }
+        PrimaryExp::LVal(lval) => match lval {
+            LVal::Var(ident) => match symtab.get_symbol(ident).unwrap() {
+                Symbol::Const(val) => (new_value!(func).integer(val), bb),
+                Symbol::Var(value) => {
+                    let temp = new_value!(func).load(value);
+                    add_value(func, bb, temp);
+                    (temp, bb)
+                }
+            },
+            LVal::Index(ident, index) => match symtab.get_symbol(ident).unwrap() {
+                Symbol::Const(_) => unreachable!("const i32 is not subscriptable"),
+                Symbol::Var(value) => {
+                    let (index_value, bb) = build_exp(func, bb, index, symtab);
+                    let pointer_value = new_value!(func).get_elem_ptr(value, index_value);
+                    add_value(func, bb, pointer_value);
+                    let elem = new_value!(func).load(pointer_value);
+                    add_value(func, bb, elem);
+                    (elem, bb)
+                }
+            },
         },
     }
 }
