@@ -21,7 +21,20 @@ Comma<T>: Vec<T> = <mut v: (<T> ",")*> <e: T> => {
 // CompUnit ::= (Decl | FuncDef) [CompUnit];
 pub CompUnit: Box<CompUnit> = {
     <func_def: FuncDef> <comp_unit: CompUnit?> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::FuncDef(func_def)) }),
-    <decl: Decl> <comp_unit: CompUnit?> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::Decl(decl)) }),
+    <decl: GlobalDecl> <comp_unit: CompUnit?> => Box::new(CompUnit { comp_unit, item: Box::new(GlobalItem::Decl(decl)) }),
+}
+
+GlobalDecl: Box<GlobalDecl> = {
+    <ConstDecl> => Box::new(GlobalDecl::Const( <> )),
+    <GlobalVarDecl> => Box::new(GlobalDecl::Var( <> )),
+}
+
+GlobalVarDecl: Box<GlobalVarDecl> = {
+    <btype: BuiltinType> <var_defs: Comma<GlobalVarDef>> ";" => Box::new(GlobalVarDecl { <> }),
+}
+
+GlobalVarDef: Box<GlobalVarDef> = {
+    <ident: Ident> <shape: ("[" <ConstExp> "]")?> <init_val: ("=" <ConstInitVal>)?> => Box::new(GlobalVarDef { <> }),
 }
 
 // FuncDef     ::= BuiltinType IDENT "(" [FuncFParams] ")" Block;

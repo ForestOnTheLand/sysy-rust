@@ -15,17 +15,41 @@ pub enum BuiltinType {
     Int,
 }
 
-/// [`CompUnit`] `::=` ([`Decl`] | [`FuncDef`]) [[`CompUnit`]]
+/// [`CompUnit`] `::=` [`GlobalItem`] [[`CompUnit`]]
 #[derive(Debug)]
 pub struct CompUnit {
     pub item: Box<GlobalItem>,
     pub comp_unit: Option<Box<CompUnit>>,
 }
 
+/// [`GlobalItem`] `::=` [`GlobalDecl`] | [`FuncDef`]
 #[derive(Debug)]
 pub enum GlobalItem {
-    Decl(Box<Decl>),
+    Decl(Box<GlobalDecl>),
     FuncDef(Box<FuncDef>),
+}
+
+/// [`GlobalDecl`] `::=` [`ConstDecl`] | [`GlobalVarDecl`]
+#[derive(Debug)]
+pub enum GlobalDecl {
+    Const(Box<ConstDecl>),
+    Var(Box<GlobalVarDecl>),
+}
+
+/// [`GlobalVarDecl`] `::=` [`BuiltinType`] [`GlobalVarDef`] {`","` [`GlobalVarDef`]} `";"`
+#[derive(Debug)]
+pub struct GlobalVarDecl {
+    pub btype: BuiltinType,
+    pub var_defs: Vec<Box<GlobalVarDef>>,
+}
+
+/// [`GlobalVarDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`]
+///                     | `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`ConstInitVal`]
+#[derive(Debug)]
+pub struct GlobalVarDef {
+    pub ident: String,
+    pub shape: Option<Box<ConstExp>>,
+    pub init_val: Option<Box<ConstInitVal>>,
 }
 
 /// [`FuncDef`] `::=` [`BuiltinType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]

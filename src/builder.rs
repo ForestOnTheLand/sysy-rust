@@ -6,7 +6,6 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::builder_traits::*;
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
-use core::panic;
 use std::io;
 
 /// Add a new value into a function.
@@ -16,10 +15,14 @@ macro_rules! new_value {
     };
 }
 
+/// One of the core features. Output a KoopaIR program into output, by using the given API.
 pub fn output_program(program: &Program, output: impl io::Write) {
     KoopaGenerator::new(output).generate_on(program).unwrap();
 }
 
+/// One of the core features. Parse an AST into a KoopaIR Program, which calls
+/// - [`declare_builtins`]
+/// - [`build_comp_unit`]
 pub fn build_program(comp_unit: &CompUnit) -> Program {
     let mut program = Program::new();
     let mut symtab = SymbolTable::new();
@@ -28,6 +31,7 @@ pub fn build_program(comp_unit: &CompUnit) -> Program {
     program
 }
 
+/// Declare Sysy builtin functions.
 fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     let builtin_functions: Vec<(String, Vec<Type>, Type)> = vec![
         // decl @getint(): i32
@@ -67,12 +71,11 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     }
 }
 
+/// Write a [`CompUnit`] into a program,
+/// with functions [`build_global_decl`], [`build_function`] and **itself** used.
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
     match comp_unit.item.as_ref() {
-        GlobalItem::Decl(decl) => match decl.as_ref() {
-            Decl::Const(decl) => build_global_const_decl(program, decl, symtab),
-            Decl::Var(decl) => build_global_var_decl(program, decl, symtab),
-        },
+        GlobalItem::Decl(decl) => build_global_decl(program, decl, symtab),
         GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
     };
     if let Some(c) = &comp_unit.comp_unit {
@@ -80,21 +83,35 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
     }
 }
 
+/// Write a **global** [`GlobalDecl`] into a program,
+/// with functions [`build_global_const_decl`], [`build_global_var_decl`] used.
+fn build_global_decl(program: &mut Program, decl: &GlobalDecl, symtab: &mut SymbolTable) {
+    match decl {
+        GlobalDecl::Const(decl) => build_global_const_decl(program, decl, symtab),
+        GlobalDecl::Var(decl) => build_global_var_decl(program, decl, symtab),
+    };
+}
+
+/// Write a **global** [`ConstDecl`] into a program,
+/// with function [`build_global_const_def`] used.
 fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut SymbolTable) {
+    assert_eq!(decl.btype, BuiltinType::Int);
     for def in decl.const_defs.iter() {
         build_global_const_def(program, def, symtab);
     }
 }
 
+/// Write a **global** [`ConstDef`] into a program,
+/// with functions [`compute_init_i32_value`], [`compute_exp`], [`compute_init_array_value`] used.
 fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
     match &def.shape {
         None => {
             let value = compute_init_i32_value(&def.const_init_val, symtab);
             symtab.insert_const(&def.ident, value).unwrap();
         }
-        Some(shape) => {
-            let len = compute_exp(&shape.exp, symtab) as usize;
-            let values = compute_init_array_value(&def.const_init_val, len, symtab)
+        Some(shape_exp) => {
+            let shape = compute_exp(&shape_exp.exp, symtab) as usize;
+            let values = compute_init_array_value(&def.const_init_val, shape, symtab)
                 .iter()
                 .map(|&i| program.new_value().integer(i))
                 .collect();
@@ -106,30 +123,47 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
     }
 }
 
-fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut SymbolTable) {
+/// Write a **global** [`GlobalVarDecl`] into a program,
+/// with function [`build_global_var_def`] used.
+fn build_global_var_decl(program: &mut Program, decl: &GlobalVarDecl, symtab: &mut SymbolTable) {
     assert_eq!(decl.btype, BuiltinType::Int);
     for def in decl.var_defs.iter() {
-        let init = match &def.init_val {
-            None => program.new_value().zero_init(Type::get_i32()),
-            Some(init_val) => match init_val.as_ref() {
-                InitVal::Single(exp) => {
-                    let val = compute_exp(exp, symtab);
-                    program.new_value().integer(val)
-                }
-                InitVal::Array(exps) => {
-                    let elems = exps
-                        .iter()
-                        .map(|exp| program.new_value().integer(compute_exp(exp, symtab)))
-                        .collect();
-                    program.new_value().aggregate(elems)
-                }
-            },
-        };
-        let value = program.new_value().global_alloc(init);
-        let name = format!("@{}", def.ident);
-        symtab.insert_var(&def.ident, value).unwrap();
-        program.set_value_name(value, Some(name));
+        build_global_var_def(program, def, symtab);
     }
+}
+
+/// Write a **global** [`GlobalVarDef`] into a program,
+/// with function [`build_global_var_def`] used.
+fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut SymbolTable) {
+    let init = match &def.shape {
+        None => match &def.init_val {
+            None => program.new_value().zero_init(Type::get_i32()),
+            Some(init_val) => program
+                .new_value()
+                .integer(compute_init_i32_value(init_val, symtab)),
+        },
+        Some(shape_exp) => {
+            let len = compute_exp(&shape_exp.exp, symtab) as usize;
+            match &def.init_val {
+                None => program
+                    .new_value()
+                    .zero_init(Type::get_array(Type::get_i32(), len)),
+                Some(init_val) => {
+                    let shape = compute_exp(&shape_exp.exp, symtab) as usize;
+                    let values = compute_init_array_value(init_val, shape, symtab)
+                        .iter()
+                        .map(|&i| program.new_value().integer(i))
+                        .collect();
+                    program.new_value().aggregate(values)
+                }
+            }
+        }
+    };
+
+    let value = program.new_value().global_alloc(init);
+    let name = format!("@{}", def.ident);
+    symtab.insert_var(&def.ident, value).unwrap();
+    program.set_value_name(value, Some(name));
 }
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
