@@ -7,10 +7,11 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum Symbol {
     Const(i32),
     Var(Value),
+    Array(Value, Vec<usize>),
 }
 
 /// Symbol table, supporting nested blocks
@@ -49,9 +50,9 @@ impl SymbolTable {
                 Some(Symbol::Const(value)) => {
                     return Ok(*value);
                 }
-                Some(Symbol::Var(_)) => {
+                Some(_) => {
                     return Err(Error::ParseError(format!(
-                        "expected '{}' to be a constant, but found an variable",
+                        "expected '{}' to be a constant",
                         ident
                     )));
                 }
@@ -75,14 +76,14 @@ impl SymbolTable {
     pub fn get_var(&self, ident: &String) -> Result<Value, Error> {
         for layer in self.data.iter().rev() {
             match layer.get(ident) {
-                Some(Symbol::Const(_)) => {
-                    return Err(Error::ParseError(format!(
-                        "expected '{}' to be an variable, but found a constant",
-                        ident
-                    )));
-                }
                 Some(Symbol::Var(value)) => {
                     return Ok(*value);
+                }
+                Some(_) => {
+                    return Err(Error::ParseError(format!(
+                        "expected '{}' to be an variable",
+                        ident
+                    )));
                 }
                 None => {}
             }
@@ -101,11 +102,44 @@ impl SymbolTable {
         }
     }
 
+    pub fn get_array(&self, ident: &String) -> Result<(Value, Vec<usize>), Error> {
+        for layer in self.data.iter().rev() {
+            match layer.get(ident) {
+                Some(Symbol::Array(value, shape)) => {
+                    return Ok((*value, shape.clone()));
+                }
+                Some(_) => {
+                    return Err(Error::ParseError(format!(
+                        "expected '{ident}' to be an array"
+                    )));
+                }
+                None => {}
+            }
+        }
+        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+    }
+
+    pub fn insert_array(
+        &mut self,
+        ident: &String,
+        value: Value,
+        shape: Vec<usize>,
+    ) -> Result<(), Error> {
+        let data = self.data.last_mut().unwrap();
+        match data.insert(ident.clone(), Symbol::Array(value, shape)) {
+            Some(_previous) => Err(Error::ParseError(format!(
+                "identifier '{}' redefined",
+                ident
+            ))),
+            None => Ok(()),
+        }
+    }
+
     pub fn get_symbol(&self, ident: &String) -> Result<Symbol, Error> {
         for layer in self.data.iter().rev() {
             match layer.get(ident) {
                 Some(symbol) => {
-                    return Ok(*symbol);
+                    return Ok(symbol.clone());
                 }
                 None => {}
             }

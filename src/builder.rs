@@ -104,22 +104,24 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 /// Write a **global** [`ConstDef`] into a program,
 /// with functions [`compute_init_i32_value`], [`compute_exp`], [`compute_init_array_value`] used.
 fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
-    match &def.shape {
-        None => {
-            let value = compute_init_i32_value(&def.const_init_val, symtab);
-            symtab.insert_const(&def.ident, value).unwrap();
-        }
-        Some(shape_exp) => {
-            let shape = compute_exp(&shape_exp.exp, symtab) as usize;
-            let values = compute_init_array_value(&def.const_init_val, shape, symtab)
-                .iter()
-                .map(|&i| program.new_value().integer(i))
-                .collect();
-            let value = program.new_value().aggregate(values);
-            let array = program.new_value().global_alloc(value);
-            program.set_value_name(array, Some(format!("@{}", def.ident)));
-            symtab.insert_var(&def.ident, array).unwrap();
-        }
+    let shape: Vec<usize> = def
+        .shape
+        .iter()
+        .map(|exp| compute_const_exp(exp, symtab) as usize)
+        .collect();
+    let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
+
+    if shape.is_empty() {
+        symtab.insert_const(&def.ident, data[0]).unwrap();
+    } else {
+        let values = data
+            .iter()
+            .map(|&i| program.new_value().integer(i))
+            .collect();
+        let value = program.new_value().aggregate(values);
+        let array = program.new_value().global_alloc(value);
+        program.set_value_name(array, Some(format!("@{}", def.ident)));
+        symtab.insert_array(&def.ident, array, shape).unwrap();
     }
 }
 
@@ -135,35 +137,40 @@ fn build_global_var_decl(program: &mut Program, decl: &GlobalVarDecl, symtab: &m
 /// Write a **global** [`GlobalVarDef`] into a program,
 /// with function [`build_global_var_def`] used.
 fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut SymbolTable) {
-    let init = match &def.shape {
-        None => match &def.init_val {
-            None => program.new_value().zero_init(Type::get_i32()),
-            Some(init_val) => program
-                .new_value()
-                .integer(compute_init_i32_value(init_val, symtab)),
-        },
-        Some(shape_exp) => {
-            let len = compute_exp(&shape_exp.exp, symtab) as usize;
-            match &def.init_val {
-                None => program
-                    .new_value()
-                    .zero_init(Type::get_array(Type::get_i32(), len)),
-                Some(init_val) => {
-                    let shape = compute_exp(&shape_exp.exp, symtab) as usize;
-                    let values = compute_init_array_value(init_val, shape, symtab)
-                        .iter()
-                        .map(|&i| program.new_value().integer(i))
-                        .collect();
-                    program.new_value().aggregate(values)
-                }
+    let shape: Vec<usize> = def
+        .shape
+        .iter()
+        .map(|exp| compute_exp(&exp.exp, symtab) as usize)
+        .collect();
+    let data: Value = match &def.init_val {
+        Some(init_val) => {
+            let elems = compute_init_value(init_val, shape.clone(), symtab);
+            let values: Vec<Value> = elems
+                .iter()
+                .map(|&i| program.new_value().integer(i))
+                .collect();
+            if shape.is_empty() {
+                values[0]
+            } else {
+                program.new_value().aggregate(values)
             }
         }
+        None => program.new_value().zero_init(if shape.len() > 0 {
+            Type::get_array(Type::get_i32(), shape.iter().product())
+        } else {
+            Type::get_i32()
+        }),
     };
 
-    let value = program.new_value().global_alloc(init);
-    let name = format!("@{}", def.ident);
-    symtab.insert_var(&def.ident, value).unwrap();
-    program.set_value_name(value, Some(name));
+    if shape.is_empty() {
+        let var = program.new_value().global_alloc(data);
+        program.set_value_name(var, Some(format!("@{}", def.ident)));
+        symtab.insert_var(&def.ident, var).unwrap();
+    } else {
+        let array = program.new_value().global_alloc(data);
+        program.set_value_name(array, Some(format!("@{}", def.ident)));
+        symtab.insert_array(&def.ident, array, shape).unwrap();
+    }
 }
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
@@ -300,37 +307,41 @@ fn build_var_def(
         return bb;
     }
 
-    match &def.shape {
-        None => {
-            let var = new_value!(func).alloc(Type::get_i32());
-            func.dfg_mut()
-                .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-            add_value(func, bb, var);
-            symtab.insert_var(&def.ident, var).unwrap();
-            if let Some(init_value) = &def.init_val {
-                let (value, bb) = build_init_i32_value(func, bb, &init_value, symtab);
-                let store = new_value!(func).store(value, var);
-                add_value(func, bb, store);
-                bb
-            } else {
-                bb
-            }
+    let shape: Vec<usize> = def
+        .shape
+        .iter()
+        .map(|exp| compute_exp(&exp.exp, symtab) as usize)
+        .collect();
+
+    if shape.is_empty() {
+        let var = new_value!(func).alloc(Type::get_i32());
+        func.dfg_mut()
+            .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+        add_value(func, bb, var);
+        symtab.insert_var(&def.ident, var).unwrap();
+        if let Some(init_value) = &def.init_val {
+            let (value, bb) = build_init_i32_value(func, bb, &init_value, symtab);
+            let store = new_value!(func).store(value, var);
+            add_value(func, bb, store);
+            bb
+        } else {
+            bb
         }
-        Some(shape) => {
-            let len = compute_exp(&shape.exp, symtab) as usize;
-            let var = new_value!(func).alloc(Type::get_array(Type::get_i32(), len));
-            func.dfg_mut()
-                .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-            add_value(func, bb, var);
-            symtab.insert_var(&def.ident, var).unwrap();
-            if let Some(init_value) = &def.init_val {
-                let (value, bb) = build_init_array_value(func, bb, &init_value, len, symtab);
-                let store = new_value!(func).store(value, var);
-                add_value(func, bb, store);
-                bb
-            } else {
-                bb
-            }
+    } else {
+        let size = shape.iter().product();
+        let var = new_value!(func).alloc(Type::get_array(Type::get_i32(), size));
+        func.dfg_mut()
+            .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+        add_value(func, bb, var);
+        symtab.insert_array(&def.ident, var, shape.clone()).unwrap();
+        if let Some(init_value) = &def.init_val {
+            let (values, bb) = build_init_array_value(func, bb, &init_value, shape, symtab);
+            let value = new_value!(func).aggregate(values);
+            let store = new_value!(func).store(value, var);
+            add_value(func, bb, store);
+            bb
+        } else {
+            bb
         }
     }
 }
@@ -351,25 +362,59 @@ fn build_init_array_value(
     func: &mut FunctionData,
     bb: BasicBlock,
     val: &InitVal,
-    shape: usize,
+    shape: Vec<usize>,
     symtab: &mut SymbolTable,
-) -> (Value, BasicBlock) {
+) -> (Vec<Value>, BasicBlock) {
+    let size = shape.iter().product();
+    let mut data = Vec::new();
+    data.resize(size, new_value!(func).integer(0));
     match val {
-        InitVal::Single(_) => panic!("parse error: expected i32, given array"),
+        InitVal::Single(exp) => {
+            let (value, next_bb) = build_exp(func, bb, exp, symtab);
+            data[0] = value;
+            (data, next_bb)
+        }
         InitVal::Array(exps) => {
-            if exps.len() > shape {
-                panic!("parse error: cannot initialize an array of length {} with an array of length {}", shape, exps.len());
-            }
+            let mut offset = 0;
             let mut bb = bb;
-            let mut init_list = Vec::new();
             for exp in exps.iter() {
-                let (value, next_bb) = build_exp(func, bb, exp, symtab);
+                let (next_offset, next_bb) =
+                    _build_init_array_value(func, bb, exp, &shape, symtab, &mut data, offset);
+                offset = next_offset;
                 bb = next_bb;
-                init_list.push(value);
             }
-            init_list.resize_with(shape, || new_value!(func).integer(0));
-            let list = new_value!(func).aggregate(init_list);
-            (list, bb)
+            (data, bb)
+        }
+    }
+}
+
+fn _build_init_array_value(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    val: &InitVal,
+    shape: &Vec<usize>,
+    symtab: &mut SymbolTable,
+    data: &mut Vec<Value>,
+    offset: usize,
+) -> (usize, BasicBlock) {
+    match val {
+        InitVal::Single(exp) => {
+            let (value, next_bb) = build_exp(func, bb, exp, symtab);
+            data[offset] = value;
+            (offset + 1, next_bb)
+        }
+        InitVal::Array(exps) => {
+            let s = get_subshape(&shape, offset);
+            let end_offset = offset + s.iter().product::<usize>();
+            let mut offset = offset;
+            let mut bb = bb;
+            for exp in exps.iter() {
+                let (next_offset, next_bb) =
+                    _build_init_array_value(func, bb, exp, &s, symtab, data, offset);
+                offset = next_offset;
+                bb = next_bb;
+            }
+            (end_offset, bb)
         }
     }
 }
@@ -388,52 +433,76 @@ fn build_const_decl(
 fn build_const_def(
     func: &mut FunctionData,
     bb: BasicBlock,
-    decl: &ConstDef,
+    def: &ConstDef,
     symtab: &mut SymbolTable,
 ) {
-    match &decl.shape {
-        None => {
-            let value = compute_init_i32_value(&decl.const_init_val, symtab);
-            symtab.insert_const(&decl.ident, value).unwrap();
-        }
-        Some(shape) => {
-            let len = compute_exp(&shape.exp, symtab) as usize;
-            let values = compute_init_array_value(&decl.const_init_val, len, symtab)
-                .iter()
-                .map(|&i| new_value!(func).integer(i))
-                .collect();
-            let value = new_value!(func).aggregate(values);
-            let array = new_value!(func).alloc(Type::get_array(Type::get_i32(), len));
-            add_value(func, bb, array);
-            let store = new_value!(func).store(value, array);
-            add_value(func, bb, store);
-            symtab.insert_var(&decl.ident, array).unwrap();
-        }
+    let shape: Vec<usize> = def
+        .shape
+        .iter()
+        .map(|exp| compute_const_exp(exp, symtab) as usize)
+        .collect();
+    let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
+
+    if shape.is_empty() {
+        symtab.insert_const(&def.ident, data[0]).unwrap();
+    } else {
+        let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
+        let value = new_value!(func).aggregate(values);
+        let array =
+            new_value!(func).alloc(Type::get_array(Type::get_i32(), shape.iter().product()));
+        add_value(func, bb, array);
+        let store = new_value!(func).store(value, array);
+        add_value(func, bb, store);
+        func.dfg_mut()
+            .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.size())));
+        symtab.insert_array(&def.ident, array, shape).unwrap();
     }
 }
 
-fn compute_init_i32_value(init: &ConstInitVal, symtab: &SymbolTable) -> i32 {
+fn compute_init_value(init: &ConstInitVal, shape: Vec<usize>, symtab: &SymbolTable) -> Vec<i32> {
+    let size = shape.iter().product();
+    let mut data = Vec::new();
+    data.resize(size, 0);
     match init {
-        ConstInitVal::Single(exp) => compute_exp(&exp.exp, symtab),
-        ConstInitVal::Array(_) => unreachable!("cannot initialize i32 with i32[]"),
-    }
-}
-
-fn compute_init_array_value(init: &ConstInitVal, shape: usize, symtab: &SymbolTable) -> Vec<i32> {
-    match init {
-        ConstInitVal::Single(_) => unreachable!("cannot initialize i32[] with i32"),
+        ConstInitVal::Single(exp) => {
+            data[0] = compute_const_exp(exp, symtab);
+        }
         ConstInitVal::Array(exps) => {
-            if exps.len() > shape {
-                panic!("parse error: cannot initialize an array of length {} with an array of length {}", shape, exps.len());
+            let mut offset = 0;
+            for exp in exps.iter() {
+                offset = _compute_init_value(exp, &shape, symtab, &mut data, offset);
             }
-            let mut values: Vec<i32> = exps
-                .iter()
-                .map(|exp| compute_exp(&exp.exp, symtab))
-                .collect();
-            values.resize_with(shape, || 0);
-            values
         }
     }
+    data
+}
+
+fn _compute_init_value(
+    init: &ConstInitVal,
+    shape: &Vec<usize>,
+    symtab: &SymbolTable,
+    data: &mut Vec<i32>,
+    offset: usize,
+) -> usize {
+    match init {
+        ConstInitVal::Single(exp) => {
+            data[offset] = compute_const_exp(exp, symtab);
+            offset + 1
+        }
+        ConstInitVal::Array(exps) => {
+            let s = get_subshape(&shape, offset);
+            let end_offset = offset + s.iter().product::<usize>();
+            let mut offset = offset;
+            for exp in exps.iter() {
+                offset = _compute_init_value(exp, &s, symtab, data, offset);
+            }
+            end_offset
+        }
+    }
+}
+
+fn compute_const_exp(exp: &ConstExp, symtab: &SymbolTable) -> i32 {
+    compute_exp(&exp.exp, symtab)
 }
 
 fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
@@ -461,10 +530,7 @@ fn compute_primary_exp(exp: &PrimaryExp, symtab: &SymbolTable) -> i32 {
     match exp {
         PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
         PrimaryExp::Number(val) => *val,
-        PrimaryExp::LVal(lval) => match lval {
-            LVal::Var(ident) => symtab.get_const(ident).unwrap(),
-            LVal::Index(_, _) => panic!("cannot evaluate array at compile time"),
-        },
+        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident).unwrap(),
     }
 }
 
@@ -564,21 +630,20 @@ fn build_stmt(
     match stmt {
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
-            match lval {
-                LVal::Var(ident) => {
-                    let store = new_value!(func).store(value, symtab.get_var(ident).unwrap());
-                    add_value(func, bb, store);
-                    bb
-                }
-                LVal::Index(ident, index) => {
-                    let array = symtab.get_var(ident).unwrap();
-                    let (index, bb) = build_exp(func, bb, index, symtab);
-                    let pointer = new_value!(func).get_elem_ptr(array, index);
-                    add_value(func, bb, pointer);
-                    let store = new_value!(func).store(value, pointer);
-                    add_value(func, bb, store);
-                    bb
-                }
+            if lval.index.is_empty() {
+                let store = new_value!(func).store(value, symtab.get_var(&lval.ident).unwrap());
+                add_value(func, bb, store);
+                bb
+            } else {
+                let mut bb = bb;
+                let (array, shape) = symtab.get_array(&lval.ident).unwrap();
+                let (total_offset, next_bb) = get_offset(func, bb, symtab, &lval.index, &shape);
+                bb = next_bb;
+                let pointer = new_value!(func).get_elem_ptr(array, total_offset);
+                add_value(func, bb, pointer);
+                let store = new_value!(func).store(value, pointer);
+                add_value(func, bb, store);
+                bb
             }
         }
 
@@ -746,26 +811,21 @@ fn build_primary_exp(
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
-        PrimaryExp::LVal(lval) => match lval {
-            LVal::Var(ident) => match symtab.get_symbol(ident).unwrap() {
-                Symbol::Const(val) => (new_value!(func).integer(val), bb),
-                Symbol::Var(value) => {
-                    let temp = new_value!(func).load(value);
-                    add_value(func, bb, temp);
-                    (temp, bb)
-                }
-            },
-            LVal::Index(ident, index) => match symtab.get_symbol(ident).unwrap() {
-                Symbol::Const(_) => unreachable!("const i32 is not subscriptable"),
-                Symbol::Var(value) => {
-                    let (index_value, bb) = build_exp(func, bb, index, symtab);
-                    let pointer_value = new_value!(func).get_elem_ptr(value, index_value);
-                    add_value(func, bb, pointer_value);
-                    let elem = new_value!(func).load(pointer_value);
-                    add_value(func, bb, elem);
-                    (elem, bb)
-                }
-            },
+        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident).unwrap() {
+            Symbol::Const(val) => (new_value!(func).integer(val), bb),
+            Symbol::Var(value) => {
+                let temp = new_value!(func).load(value);
+                add_value(func, bb, temp);
+                (temp, bb)
+            }
+            Symbol::Array(array, shape) => {
+                let (total_offset, bb) = get_offset(func, bb, symtab, &lval.index, &shape);
+                let pointer = new_value!(func).get_elem_ptr(array, total_offset);
+                add_value(func, bb, pointer);
+                let load = new_value!(func).load(pointer);
+                add_value(func, bb, load);
+                (load, bb)
+            }
         },
     }
 }
@@ -1002,4 +1062,42 @@ fn add_bb(func: &mut FunctionData, bb: BasicBlock) {
 
 fn new_bb(func: &mut FunctionData, name: String) -> BasicBlock {
     func.dfg_mut().new_bb().basic_block(Some(name))
+}
+
+fn get_subshape(shape: &Vec<usize>, offset: usize) -> Vec<usize> {
+    let mut size = shape.last().unwrap().clone();
+    assert!(offset % size == 0, "array not aligned");
+    let mut index = 1;
+    for i in (1..(shape.len() - 1)).rev() {
+        size *= shape[i];
+        if offset % size != 0 {
+            index = i + 1;
+            break;
+        }
+    }
+    shape[index..].to_vec()
+}
+
+fn get_offset(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    symtab: &SymbolTable,
+    index: &Vec<Box<Exp>>,
+    shape: &Vec<usize>,
+) -> (Value, BasicBlock) {
+    assert_eq!(index.len(), shape.len());
+    let mut bb = bb;
+    let mut total_offset = new_value!(func).integer(0);
+    let mut stride = 1;
+    for (exp, len) in std::iter::zip(index.iter().rev(), shape.iter().rev()) {
+        let (index, next_bb) = build_exp(func, bb, exp, symtab);
+        bb = next_bb;
+        let s = new_value!(func).integer(stride);
+        let offset = new_value!(func).binary(BinaryOp::Mul, index, s);
+        add_value(func, bb, offset);
+        total_offset = new_value!(func).binary(BinaryOp::Add, total_offset, offset);
+        add_value(func, bb, total_offset);
+        stride *= *len as i32;
+    }
+    (total_offset, bb)
 }

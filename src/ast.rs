@@ -43,12 +43,12 @@ pub struct GlobalVarDecl {
     pub var_defs: Vec<Box<GlobalVarDef>>,
 }
 
-/// [`GlobalVarDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`]
-///                     | `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`ConstInitVal`]
+/// [`GlobalVarDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`}
+///                     | `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`ConstInitVal`]
 #[derive(Debug)]
 pub struct GlobalVarDef {
     pub ident: String,
-    pub shape: Option<Box<ConstExp>>,
+    pub shape: Vec<Box<ConstExp>>,
     pub init_val: Option<Box<ConstInitVal>>,
 }
 
@@ -121,20 +121,20 @@ pub struct VarDecl {
     pub var_defs: Vec<Box<VarDef>>,
 }
 
-/// [`VarDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`]
-///               | `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`InitVal`]
+/// [`VarDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`}
+///               | `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`InitVal`]
 #[derive(Debug)]
 pub struct VarDef {
     pub ident: String,
-    pub shape: Option<Box<ConstExp>>,
+    pub shape: Vec<Box<ConstExp>>,
     pub init_val: Option<Box<InitVal>>,
 }
 
-/// [`InitVal`] `::=` [`Exp`] | `"{"` [[`Exp`] {`","` [`Exp`]}] `"}"`
+/// [`InitVal`] `::=` [`Exp`] | `"{"` [[`InitVal`] {`","` [`InitVal`]}] `"}"`
 #[derive(Debug)]
 pub enum InitVal {
     Single(Box<Exp>),
-    Array(Vec<Box<Exp>>),
+    Array(Vec<Box<InitVal>>),
 }
 
 /// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
@@ -149,11 +149,11 @@ pub struct ConstDecl {
 //     Int,
 // }
 
-/// [`ConstDef`] `::=` `IDENT` [`"["` [`ConstExp`] `"]"`] `"="` [`ConstInitVal`]
+/// [`ConstDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`ConstInitVal`]
 #[derive(Debug)]
 pub struct ConstDef {
     pub ident: String,
-    pub shape: Option<Box<ConstExp>>,
+    pub shape: Vec<Box<ConstExp>>,
     pub const_init_val: Box<ConstInitVal>,
 }
 
@@ -161,14 +161,14 @@ pub struct ConstDef {
 #[derive(Debug)]
 pub enum ConstInitVal {
     Single(Box<ConstExp>),
-    Array(Vec<Box<ConstExp>>),
+    Array(Vec<Box<ConstInitVal>>),
 }
 
-/// [`LVal`] `::=` `IDENT` [`"["` [`Exp`] `"]"`]
+/// [`LVal`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
 #[derive(Debug)]
-pub enum LVal {
-    Var(String),
-    Index(String, Box<Exp>),
+pub struct LVal {
+    pub ident: String,
+    pub index: Vec<Box<Exp>>,
 }
 
 /// [`ConstExp`] `::=` [`Exp`]
