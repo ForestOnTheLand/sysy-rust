@@ -114,11 +114,7 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
     if shape.is_empty() {
         symtab.insert_const(&def.ident, data[0]).unwrap();
     } else {
-        let values = data
-            .iter()
-            .map(|&i| program.new_value().integer(i))
-            .collect();
-        let value = program.new_value().aggregate(values);
+        let value = global_packing(program, &data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
         symtab.insert_array(&def.ident, array, shape).unwrap();
@@ -145,14 +141,10 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
     let data: Value = match &def.init_val {
         Some(init_val) => {
             let elems = compute_init_value(init_val, shape.clone(), symtab);
-            let values: Vec<Value> = elems
-                .iter()
-                .map(|&i| program.new_value().integer(i))
-                .collect();
             if shape.is_empty() {
-                values[0]
+                program.new_value().integer(elems[0])
             } else {
-                program.new_value().aggregate(values)
+                global_packing(program, &elems, &shape)
             }
         }
         None => program.new_value().zero_init(if shape.len() > 0 {
@@ -342,15 +334,15 @@ fn build_var_def(
             bb
         }
     } else {
-        let size = shape.iter().product();
-        let var = new_value!(func).alloc(Type::get_array(Type::get_i32(), size));
+        let size: usize = shape.iter().product();
+        let var = new_value!(func).alloc(get_array_type(&shape));
         func.dfg_mut()
             .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
         add_value(func, bb, var);
         symtab.insert_array(&def.ident, var, shape.clone()).unwrap();
         if let Some(init_value) = &def.init_val {
-            let (values, bb) = build_init_array_value(func, bb, &init_value, shape, symtab);
-            let value = new_value!(func).aggregate(values);
+            let (values, bb) = build_init_array_value(func, bb, &init_value, shape.clone(), symtab);
+            let value = local_packing(func, values, &shape);
             let store = new_value!(func).store(value, var);
             add_value(func, bb, store);
             bb
@@ -461,9 +453,9 @@ fn build_const_def(
         symtab.insert_const(&def.ident, data[0]).unwrap();
     } else {
         let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
-        let value = new_value!(func).aggregate(values);
-        let array =
-            new_value!(func).alloc(Type::get_array(Type::get_i32(), shape.iter().product()));
+        let value = local_packing(func, values, &shape);
+        let ty = func.dfg().value(value).ty().clone();
+        let array = new_value!(func).alloc(ty);
         add_value(func, bb, array);
         let store = new_value!(func).store(value, array);
         add_value(func, bb, store);
@@ -631,6 +623,28 @@ fn compute_lor_exp(exp: &LOrExp, symtab: &SymbolTable) -> i32 {
     }
 }
 
+fn build_lval(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    lval: &LVal,
+    symtab: &SymbolTable,
+) -> (Value, BasicBlock) {
+    if lval.index.is_empty() {
+        (symtab.get_var(&lval.ident).unwrap(), bb)
+    } else {
+        let mut bb = bb;
+        let (array, shape) = symtab.get_array(&lval.ident).unwrap();
+        let mut pointer = array;
+        for index in lval.index.iter() {
+            let (index, next_bb) = build_exp(func, bb, index, symtab);
+            bb = next_bb;
+            pointer = new_value!(func).get_elem_ptr(pointer, index);
+            add_value(func, bb, pointer);
+        }
+        (pointer, bb)
+    }
+}
+
 fn build_stmt(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -644,21 +658,10 @@ fn build_stmt(
     match stmt {
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
-            if lval.index.is_empty() {
-                let store = new_value!(func).store(value, symtab.get_var(&lval.ident).unwrap());
-                add_value(func, bb, store);
-                bb
-            } else {
-                let mut bb = bb;
-                let (array, shape) = symtab.get_array(&lval.ident).unwrap();
-                let (total_offset, next_bb) = get_offset(func, bb, symtab, &lval.index, &shape);
-                bb = next_bb;
-                let pointer = new_value!(func).get_elem_ptr(array, total_offset);
-                add_value(func, bb, pointer);
-                let store = new_value!(func).store(value, pointer);
-                add_value(func, bb, store);
-                bb
-            }
+            let (pos, bb) = build_lval(func, bb, lval, symtab);
+            let store = new_value!(func).store(value, pos);
+            add_value(func, bb, store);
+            bb
         }
 
         Stmt::Return(exp) => {
@@ -827,16 +830,9 @@ fn build_primary_exp(
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
         PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident).unwrap() {
             Symbol::Const(val) => (new_value!(func).integer(val), bb),
-            Symbol::Var(value) => {
-                let temp = new_value!(func).load(value);
-                add_value(func, bb, temp);
-                (temp, bb)
-            }
-            Symbol::Array(array, shape) => {
-                let (total_offset, bb) = get_offset(func, bb, symtab, &lval.index, &shape);
-                let pointer = new_value!(func).get_elem_ptr(array, total_offset);
-                add_value(func, bb, pointer);
-                let load = new_value!(func).load(pointer);
+            _ => {
+                let (pos, bb) = build_lval(func, bb, lval, symtab);
+                let load = new_value!(func).load(pos);
                 add_value(func, bb, load);
                 (load, bb)
             }
@@ -1092,26 +1088,49 @@ fn get_subshape(shape: &Vec<usize>, offset: usize) -> Vec<usize> {
     shape[index..].to_vec()
 }
 
-fn get_offset(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    symtab: &SymbolTable,
-    index: &Vec<Box<Exp>>,
-    shape: &Vec<usize>,
-) -> (Value, BasicBlock) {
-    assert_eq!(index.len(), shape.len());
-    let mut bb = bb;
-    let mut total_offset = new_value!(func).integer(0);
-    let mut stride = 1;
-    for (exp, len) in std::iter::zip(index.iter().rev(), shape.iter().rev()) {
-        let (index, next_bb) = build_exp(func, bb, exp, symtab);
-        bb = next_bb;
-        let s = new_value!(func).integer(stride);
-        let offset = new_value!(func).binary(BinaryOp::Mul, index, s);
-        add_value(func, bb, offset);
-        total_offset = new_value!(func).binary(BinaryOp::Add, total_offset, offset);
-        add_value(func, bb, total_offset);
-        stride *= *len as i32;
+fn global_packing(program: &mut Program, data: &Vec<i32>, shape: &Vec<usize>) -> Value {
+    assert_eq!(data.len(), shape.iter().product());
+    let mut data: Vec<Value> = data
+        .iter()
+        .map(|&i| program.new_value().integer(i))
+        .collect();
+    for &length in shape.iter().rev() {
+        let mut next_data = Vec::new();
+        let mut pack = Vec::new();
+        for value in data {
+            pack.push(value);
+            if pack.len() == length {
+                next_data.push(program.new_value().aggregate(pack));
+                pack = Vec::new();
+            }
+        }
+        data = next_data
     }
-    (total_offset, bb)
+    data[0]
+}
+
+fn local_packing(func: &mut FunctionData, data: Vec<Value>, shape: &Vec<usize>) -> Value {
+    assert_eq!(data.len(), shape.iter().product());
+    let mut data = data;
+    for &length in shape.iter().rev() {
+        let mut next_data = Vec::new();
+        let mut pack = Vec::new();
+        for value in data {
+            pack.push(value);
+            if pack.len() == length {
+                next_data.push(new_value!(func).aggregate(pack));
+                pack = Vec::new();
+            }
+        }
+        data = next_data
+    }
+    data[0]
+}
+
+fn get_array_type(shape: &Vec<usize>) -> Type {
+    let mut ty = Type::get_i32();
+    for &length in shape.iter().rev() {
+        ty = Type::get_array(ty, length);
+    }
+    ty
 }
