@@ -67,11 +67,12 @@ pub struct FuncFParams {
     pub params: Vec<FuncFParam>,
 }
 
-/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT`
+/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" ConstExp "]"}]
 #[derive(Debug)]
 pub struct FuncFParam {
     pub btype: BuiltinType,
     pub ident: String,
+    pub shape: Option<Vec<Box<ConstExp>>>,
 }
 
 /// [`Block`] `::=` `"{"` {[`BlockItem`]} `"}"`

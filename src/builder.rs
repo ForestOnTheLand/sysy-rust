@@ -102,7 +102,7 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 }
 
 /// Write a **global** [`ConstDef`] into a program,
-/// with functions [`compute_init_i32_value`], [`compute_exp`], [`compute_init_array_value`] used.
+/// with functions [`compute_init_value`], [`compute_exp`], [`compute_init_array_value`] used.
 fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
     let shape: Vec<usize> = def
         .shape
@@ -175,7 +175,7 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
     symtab.enter_block();
-    let (func, ret) = parse_function(program, func_def);
+    let (func, ret) = parse_function(program, func_def, symtab);
     let func_data = program.func_mut(func);
     symtab
         .insert_function(func_def.ident.clone(), func)
@@ -203,25 +203,38 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
     symtab.quit_block().unwrap();
 }
 
-fn parse_function(program: &mut Program, func_def: &FuncDef) -> (Function, Type) {
-    let mut params = Vec::new();
-    if let Some(p) = &func_def.params {
-        for param in p.params.iter() {
-            params.push((
-                Some(format!("@{}", param.ident)),
-                match param.btype {
-                    BuiltinType::Int => Type::get_i32(),
-                    _ => panic!("parse error: `void` is not a valid type for variables"),
-                },
-            ))
-        }
-    }
+fn parse_function(
+    program: &mut Program,
+    func_def: &FuncDef,
+    symtab: &SymbolTable,
+) -> (Function, Type) {
+    let params = parse_params(func_def);
     let ret_ty = match func_def.func_type {
         BuiltinType::Int => Type::get_i32(),
         BuiltinType::Void => Type::get_unit(),
     };
     let f = FunctionData::with_param_names(format!("@{}", func_def.ident), params, ret_ty.clone());
     (program.new_func(f), ret_ty)
+}
+
+fn parse_params(func_def: &FuncDef) -> Vec<(Option<String>, Type)> {
+    let mut params = Vec::new();
+    if let Some(p) = &func_def.params {
+        for param in p.params.iter() {
+            params.push((
+                Some(format!("@{}", param.ident)),
+                match &param.shape {
+                    None => Type::get_i32(),
+                    Some(shape) => Type::get_pointer(if shape.is_empty() {
+                        Type::get_i32()
+                    } else {
+                        unimplemented!()
+                    }),
+                },
+            ))
+        }
+    }
+    params
 }
 
 fn build_params(
@@ -233,7 +246,8 @@ fn build_params(
     for i in 0..params.params.len() {
         let value = func.params()[i];
         let ident = format!("%{}_p", params.params[i].ident);
-        let p = new_value!(func).alloc(Type::get_i32());
+        let ty = func.dfg().value(value).ty().clone();
+        let p = new_value!(func).alloc(ty);
         func.dfg_mut().set_value_name(p, Some(ident.clone()));
         add_value(func, bb, p);
         let store = new_value!(func).store(value, p);
