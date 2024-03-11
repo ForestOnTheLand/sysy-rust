@@ -178,10 +178,8 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
             let ret = new_value!(func_data).ret(None);
             add_value(func_data, bb, ret);
         } else {
-            panic!(
-                "parse error: Expected a `return` instruction at the end of a non-void function '{}'",
-                func_data.name()
-            );
+            let jmp = new_value!(func_data).jump(bb);
+            add_value(func_data, bb, jmp);
         }
     }
     symtab.quit_block().unwrap();
@@ -623,7 +621,6 @@ fn build_lval(
             _ => unimplemented!(),
         };
     }
-    println!("> {}", current_type.kind());
     (pointer, bb, current_type)
 }
 
@@ -791,7 +788,6 @@ fn build_unary_exp(
                 for param in params.exps.iter() {
                     let (value, next_bb) = build_exp(func, bb, param, symtab);
                     bb = next_bb;
-                    println!("{}", func.dfg().value(value).ty().kind());
                     args.push(value);
                 }
             }
@@ -808,7 +804,6 @@ fn build_primary_exp(
     exp: &PrimaryExp,
     symtab: &SymbolTable,
 ) -> (Value, BasicBlock) {
-    println!("{:#?}", symtab);
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
