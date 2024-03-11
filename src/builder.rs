@@ -596,35 +596,35 @@ fn build_lval(
     bb: BasicBlock,
     lval: &LVal,
     symtab: &SymbolTable,
-) -> (Value, BasicBlock) {
-    if lval.index.is_empty() {
-        (symtab.get_var(&lval.ident).unwrap().0, bb)
-    } else {
-        let mut bb = bb;
-        let (array, ty) = symtab.get_var(&lval.ident).unwrap();
-        let mut current_type = match ty.kind() {
-            TypeKind::Pointer(ty) => ty.clone(),
-            _ => unreachable!(),
+) -> (Value, BasicBlock, Type) {
+    let mut bb = bb;
+    let (array, ty) = symtab.get_var(&lval.ident).unwrap();
+    let mut current_type = match ty.kind() {
+        TypeKind::Pointer(ty) => ty.clone(),
+        _ => unreachable!(),
+    };
+    let mut pointer = array;
+    for index in lval.index.iter() {
+        let (index, next_bb) = build_exp(func, bb, index, symtab);
+        bb = next_bb;
+        match current_type.kind() {
+            TypeKind::Array(next_ty, _) => {
+                current_type = next_ty.clone();
+                pointer = new_value!(func).get_elem_ptr(pointer, index);
+                add_value(func, bb, pointer);
+            }
+            TypeKind::Pointer(next_ty) => {
+                current_type = next_ty.clone();
+                pointer = new_value!(func).load(pointer);
+                add_value(func, bb, pointer);
+                pointer = new_value!(func).get_ptr(pointer, index);
+                add_value(func, bb, pointer);
+            }
+            _ => unimplemented!(),
         };
-        let mut pointer = array;
-        for index in lval.index.iter() {
-            let (index, next_bb) = build_exp(func, bb, index, symtab);
-            bb = next_bb;
-            match current_type.kind() {
-                TypeKind::Array(next_ty, _) => {
-                    current_type = next_ty.clone();
-                    pointer = new_value!(func).get_elem_ptr(pointer, index);
-                }
-                TypeKind::Pointer(next_ty) => {
-                    current_type = next_ty.clone();
-                    pointer = new_value!(func).get_ptr(pointer, index);
-                }
-                _ => unimplemented!(),
-            };
-            add_value(func, bb, pointer);
-        }
-        (pointer, bb)
     }
+    println!("> {}", current_type.kind());
+    (pointer, bb, current_type)
 }
 
 fn build_stmt(
@@ -640,7 +640,7 @@ fn build_stmt(
     match stmt {
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
-            let (pos, bb) = build_lval(func, bb, lval, symtab);
+            let (pos, bb, _) = build_lval(func, bb, lval, symtab);
             let store = new_value!(func).store(value, pos);
             add_value(func, bb, store);
             bb
@@ -791,6 +791,7 @@ fn build_unary_exp(
                 for param in params.exps.iter() {
                     let (value, next_bb) = build_exp(func, bb, param, symtab);
                     bb = next_bb;
+                    println!("{}", func.dfg().value(value).ty().kind());
                     args.push(value);
                 }
             }
@@ -807,16 +808,24 @@ fn build_primary_exp(
     exp: &PrimaryExp,
     symtab: &SymbolTable,
 ) -> (Value, BasicBlock) {
+    println!("{:#?}", symtab);
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
         PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident).unwrap() {
             Symbol::Const(val) => (new_value!(func).integer(val), bb),
             _ => {
-                let (pos, bb) = build_lval(func, bb, lval, symtab);
-                let load = new_value!(func).load(pos);
-                add_value(func, bb, load);
-                (load, bb)
+                let (pos, bb, ty) = build_lval(func, bb, lval, symtab);
+                if matches!(ty.kind(), TypeKind::Array(_, _)) {
+                    let zero = new_value!(func).integer(0);
+                    let pos = new_value!(func).get_elem_ptr(pos, zero);
+                    add_value(func, bb, pos);
+                    (pos, bb)
+                } else {
+                    let load = new_value!(func).load(pos);
+                    add_value(func, bb, load);
+                    (load, bb)
+                }
             }
         },
     }
