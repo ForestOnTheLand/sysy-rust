@@ -117,7 +117,7 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
         let value = global_packing(program, &data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
-        symtab.insert_array(&def.ident, array, shape).unwrap();
+        symtab.insert_var(&def.ident, array).unwrap();
     }
 }
 
@@ -147,22 +147,12 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
                 global_packing(program, &elems, &shape)
             }
         }
-        None => program.new_value().zero_init(if shape.len() > 0 {
-            Type::get_array(Type::get_i32(), shape.iter().product())
-        } else {
-            Type::get_i32()
-        }),
+        None => program.new_value().zero_init(get_array_type(&shape)),
     };
 
-    if shape.is_empty() {
-        let var = program.new_value().global_alloc(data);
-        program.set_value_name(var, Some(format!("@{}", def.ident)));
-        symtab.insert_var(&def.ident, var).unwrap();
-    } else {
-        let array = program.new_value().global_alloc(data);
-        program.set_value_name(array, Some(format!("@{}", def.ident)));
-        symtab.insert_array(&def.ident, array, shape).unwrap();
-    }
+    let var = program.new_value().global_alloc(data);
+    program.set_value_name(var, Some(format!("@{}", def.ident)));
+    symtab.insert_var(&def.ident, var).unwrap();
 }
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
@@ -200,7 +190,7 @@ fn parse_function(
     func_def: &FuncDef,
     symtab: &SymbolTable,
 ) -> (Function, Type) {
-    let params = parse_params(func_def);
+    let params = parse_params(func_def, symtab);
     let ret_ty = match func_def.func_type {
         BuiltinType::Int => Type::get_i32(),
         BuiltinType::Void => Type::get_unit(),
@@ -209,7 +199,7 @@ fn parse_function(
     (program.new_func(f), ret_ty)
 }
 
-fn parse_params(func_def: &FuncDef) -> Vec<(Option<String>, Type)> {
+fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>, Type)> {
     let mut params = Vec::new();
     if let Some(p) = &func_def.params {
         for param in p.params.iter() {
@@ -217,11 +207,13 @@ fn parse_params(func_def: &FuncDef) -> Vec<(Option<String>, Type)> {
                 Some(format!("@{}", param.ident)),
                 match &param.shape {
                     None => Type::get_i32(),
-                    Some(shape) => Type::get_pointer(if shape.is_empty() {
-                        Type::get_i32()
-                    } else {
-                        unimplemented!()
-                    }),
+                    Some(shape) => {
+                        let shape = shape
+                            .iter()
+                            .map(|e| compute_const_exp(e, symtab) as usize)
+                            .collect();
+                        Type::get_pointer(get_array_type(&shape))
+                    }
                 },
             ))
         }
@@ -334,12 +326,11 @@ fn build_var_def(
             bb
         }
     } else {
-        let size: usize = shape.iter().product();
         let var = new_value!(func).alloc(get_array_type(&shape));
         func.dfg_mut()
             .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
         add_value(func, bb, var);
-        symtab.insert_array(&def.ident, var, shape.clone()).unwrap();
+        symtab.insert_var(&def.ident, var).unwrap();
         if let Some(init_value) = &def.init_val {
             let (values, bb) = build_init_array_value(func, bb, &init_value, shape.clone(), symtab);
             let value = local_packing(func, values, &shape);
@@ -461,7 +452,7 @@ fn build_const_def(
         add_value(func, bb, store);
         func.dfg_mut()
             .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.size())));
-        symtab.insert_array(&def.ident, array, shape).unwrap();
+        symtab.insert_var(&def.ident, array).unwrap();
     }
 }
 
@@ -633,7 +624,7 @@ fn build_lval(
         (symtab.get_var(&lval.ident).unwrap(), bb)
     } else {
         let mut bb = bb;
-        let (array, shape) = symtab.get_array(&lval.ident).unwrap();
+        let array = symtab.get_var(&lval.ident).unwrap();
         let mut pointer = array;
         for index in lval.index.iter() {
             let (index, next_bb) = build_exp(func, bb, index, symtab);
