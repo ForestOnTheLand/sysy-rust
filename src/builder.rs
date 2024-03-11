@@ -1,7 +1,7 @@
 //! In this file, the conversion from AST to KoopaIR is provided.
 
 use crate::ast::*;
-use crate::symtab::{Symbol, SymbolTable};
+use crate::build_util::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
 use koopa::ir::{builder_traits::*, TypeKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
@@ -102,13 +102,9 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 }
 
 /// Write a **global** [`ConstDef`] into a program,
-/// with functions [`compute_init_value`], [`compute_exp`], [`compute_init_array_value`] used.
+/// with functions [`compute_init_value`], [`compute_exp`], [`compute_init_value`] used.
 fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
-    let shape: Vec<usize> = def
-        .shape
-        .iter()
-        .map(|exp| compute_const_exp(exp, symtab) as usize)
-        .collect();
+    let shape = compute_shape(&def.shape, symtab);
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
 
     if shape.is_empty() {
@@ -134,11 +130,7 @@ fn build_global_var_decl(program: &mut Program, decl: &GlobalVarDecl, symtab: &m
 /// Write a **global** [`GlobalVarDef`] into a program,
 /// with function [`build_global_var_def`] used.
 fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut SymbolTable) {
-    let shape: Vec<usize> = def
-        .shape
-        .iter()
-        .map(|exp| compute_exp(&exp.exp, symtab) as usize)
-        .collect();
+    let shape = compute_shape(&def.shape, symtab);
     let data: Value = match &def.init_val {
         Some(init_val) => {
             let elems = compute_init_value(init_val, shape.clone(), symtab);
@@ -157,6 +149,7 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
     symtab.insert_var(&def.ident, var, ty).unwrap();
 }
 
+/// Write a [`FuncDef`] into a program.
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
     symtab.enter_block();
     let (func, ret) = parse_function(program, func_def, symtab);
@@ -178,13 +171,16 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
             let ret = new_value!(func_data).ret(None);
             add_value(func_data, bb, ret);
         } else {
-            let jmp = new_value!(func_data).jump(bb);
-            add_value(func_data, bb, jmp);
+            let zero = new_value!(func_data).integer(0);
+            let ret = new_value!(func_data).ret(Some(zero));
+            add_value(func_data, bb, ret);
         }
     }
     symtab.quit_block().unwrap();
 }
 
+/// Initialize a [`FunctionData`] with a given [`FuncDef`].
+/// Returns the handle [`Function`] and its returning [`Type`].
 fn parse_function(
     program: &mut Program,
     func_def: &FuncDef,
@@ -199,6 +195,8 @@ fn parse_function(
     (program.new_func(f), ret_ty)
 }
 
+/// Parsing arguments of a function.
+/// Returns a [`Vec`] containing the name and [`Type`] of each argument.
 fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>, Type)> {
     let mut params = Vec::new();
     if let Some(p) = &func_def.params {
@@ -208,10 +206,7 @@ fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>
                 match &param.shape {
                     None => Type::get_i32(),
                     Some(shape) => {
-                        let shape = shape
-                            .iter()
-                            .map(|e| compute_const_exp(e, symtab) as usize)
-                            .collect();
+                        let shape = compute_shape(shape, symtab);
                         Type::get_pointer(get_array_type(&shape))
                     }
                 },
@@ -221,6 +216,7 @@ fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>
     params
 }
 
+/// After entering the function block, we need to store the arguments locally.
 fn build_params(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -241,6 +237,7 @@ fn build_params(
     }
 }
 
+/// Builds a [`Block`] into a [`FunctionData`].
 fn build_block(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -256,6 +253,7 @@ fn build_block(
     next_bb
 }
 
+/// Builds a [`BlockItem`] into a [`FunctionData`].
 fn build_block_item(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -268,6 +266,7 @@ fn build_block_item(
     }
 }
 
+/// Builds a declaration into a function.
 fn build_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -283,6 +282,7 @@ fn build_decl(
     }
 }
 
+/// Builds a [`VarDecl`] into a [`FunctionData`].
 fn build_var_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -296,6 +296,7 @@ fn build_var_decl(
     bb
 }
 
+/// Builds a [`VarDef`] into a [`FunctionData`].
 fn build_var_def(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -306,15 +307,11 @@ fn build_var_def(
         return bb;
     }
 
-    let shape: Vec<usize> = def
-        .shape
-        .iter()
-        .map(|exp| compute_exp(&exp.exp, symtab) as usize)
-        .collect();
+    let shape = compute_shape(&def.shape, symtab);
 
     let var = new_value!(func).alloc(get_array_type(&shape));
     func.dfg_mut()
-        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.layer_id())));
     add_value(func, bb, var);
     let ty = func.dfg().value(var).ty().clone();
     symtab.insert_var(&def.ident, var, ty).unwrap();
@@ -424,8 +421,10 @@ fn build_const_def(
         add_value(func, bb, array);
         let store = new_value!(func).store(value, array);
         add_value(func, bb, store);
-        func.dfg_mut()
-            .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.size())));
+        func.dfg_mut().set_value_name(
+            array,
+            Some(format!("@{}_{}", &def.ident, symtab.layer_id())),
+        );
         let ty = func.dfg().value(array).ty().clone();
         symtab.insert_var(&def.ident, array, ty).unwrap();
     }
@@ -1119,4 +1118,11 @@ fn get_array_type(shape: &Vec<usize>) -> Type {
         ty = Type::get_array(ty, length);
     }
     ty
+}
+
+fn compute_shape(shape: &Vec<Box<ConstExp>>, symtab: &SymbolTable) -> Vec<usize> {
+    shape
+        .iter()
+        .map(|e| compute_const_exp(e, symtab) as usize)
+        .collect()
 }

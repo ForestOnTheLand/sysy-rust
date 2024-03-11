@@ -3,12 +3,12 @@
 
 /// Struct/Enum for AST
 mod ast;
+/// Symbol table
+mod build_util;
 /// Build KoopaIR from AST
 mod builder;
 /// RISCV Register
 mod register;
-/// Symbol table
-mod symtab;
 /// Translate KoopaIR into RISCV
 mod translator;
 /// Util functions
