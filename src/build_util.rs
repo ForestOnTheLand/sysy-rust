@@ -1,4 +1,4 @@
-//! Symbol table for KoopaIR.
+//! Utils for generating KoopaIR.
 
 use crate::util::Error;
 use koopa::ir::{BasicBlock, Function, Type, Value};
@@ -7,13 +7,18 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+// Symbol, either a constant or a variable
 #[derive(Debug, Clone)]
 pub enum Symbol {
     Const(i32),
     Var(Value, Type),
 }
 
-/// Symbol table, supporting nested blocks
+/// Symbol table, recording:
+/// - [`SymbolTable::data`] : a map from identifier to its corresponding symbol
+/// - [`SymbolTable::loops`] : the start & end of each loop, in order to continue & break
+/// - [`SymbolTable::function`] : a map from function name to its corresponding function
+/// - [`SymbolTable::counter`] : an increasing id for blocks
 #[derive(Debug)]
 pub struct SymbolTable {
     data: Vec<HashMap<String, Symbol>>,

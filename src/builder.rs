@@ -102,7 +102,7 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 }
 
 /// Write a **global** [`ConstDef`] into a program,
-/// with functions [`compute_init_value`], [`compute_exp`], [`compute_init_value`] used.
+/// with function [`compute_init_value`] used.
 fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
@@ -1126,3 +1126,5 @@ fn compute_shape(shape: &Vec<Box<ConstExp>>, symtab: &SymbolTable) -> Vec<usize>
         .map(|e| compute_const_exp(e, symtab) as usize)
         .collect()
 }
+
+// fn get_integer(val: Value) ->
