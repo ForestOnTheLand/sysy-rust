@@ -3,7 +3,7 @@
 use crate::ast::*;
 use crate::symtab::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
-use koopa::ir::builder_traits::*;
+use koopa::ir::{builder_traits::*, TypeKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
 use std::io;
@@ -117,7 +117,8 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
         let value = global_packing(program, &data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
-        symtab.insert_var(&def.ident, array).unwrap();
+        let ty = program.borrow_value(array).ty().clone();
+        symtab.insert_var(&def.ident, array, ty).unwrap();
     }
 }
 
@@ -152,7 +153,8 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
 
     let var = program.new_value().global_alloc(data);
     program.set_value_name(var, Some(format!("@{}", def.ident)));
-    symtab.insert_var(&def.ident, var).unwrap();
+    let ty = program.borrow_value(var).ty().clone();
+    symtab.insert_var(&def.ident, var, ty).unwrap();
 }
 
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
@@ -236,7 +238,8 @@ fn build_params(
         add_value(func, bb, p);
         let store = new_value!(func).store(value, p);
         add_value(func, bb, store);
-        symtab.insert_var(&params.params[i].ident, p).unwrap();
+        let ty = func.dfg().value(p).ty().clone();
+        symtab.insert_var(&params.params[i].ident, p, ty).unwrap();
     }
 }
 
@@ -311,51 +314,24 @@ fn build_var_def(
         .map(|exp| compute_exp(&exp.exp, symtab) as usize)
         .collect();
 
-    if shape.is_empty() {
-        let var = new_value!(func).alloc(Type::get_i32());
-        func.dfg_mut()
-            .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-        add_value(func, bb, var);
-        symtab.insert_var(&def.ident, var).unwrap();
-        if let Some(init_value) = &def.init_val {
-            let (value, bb) = build_init_i32_value(func, bb, &init_value, symtab);
-            let store = new_value!(func).store(value, var);
-            add_value(func, bb, store);
-            bb
-        } else {
-            bb
-        }
+    let var = new_value!(func).alloc(get_array_type(&shape));
+    func.dfg_mut()
+        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
+    add_value(func, bb, var);
+    let ty = func.dfg().value(var).ty().clone();
+    symtab.insert_var(&def.ident, var, ty).unwrap();
+    if let Some(init_value) = &def.init_val {
+        let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
+        let value = local_packing(func, values, &shape);
+        let store = new_value!(func).store(value, var);
+        add_value(func, bb, store);
+        bb
     } else {
-        let var = new_value!(func).alloc(get_array_type(&shape));
-        func.dfg_mut()
-            .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.size())));
-        add_value(func, bb, var);
-        symtab.insert_var(&def.ident, var).unwrap();
-        if let Some(init_value) = &def.init_val {
-            let (values, bb) = build_init_array_value(func, bb, &init_value, shape.clone(), symtab);
-            let value = local_packing(func, values, &shape);
-            let store = new_value!(func).store(value, var);
-            add_value(func, bb, store);
-            bb
-        } else {
-            bb
-        }
+        bb
     }
 }
 
-fn build_init_i32_value(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    val: &InitVal,
-    symtab: &mut SymbolTable,
-) -> (Value, BasicBlock) {
-    match val {
-        InitVal::Single(exp) => build_exp(func, bb, exp, symtab),
-        InitVal::Array(_) => panic!("parse error: expected array, given i32"),
-    }
-}
-
-fn build_init_array_value(
+fn build_init_value(
     func: &mut FunctionData,
     bb: BasicBlock,
     val: &InitVal,
@@ -452,7 +428,8 @@ fn build_const_def(
         add_value(func, bb, store);
         func.dfg_mut()
             .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.size())));
-        symtab.insert_var(&def.ident, array).unwrap();
+        let ty = func.dfg().value(array).ty().clone();
+        symtab.insert_var(&def.ident, array, ty).unwrap();
     }
 }
 
@@ -621,15 +598,29 @@ fn build_lval(
     symtab: &SymbolTable,
 ) -> (Value, BasicBlock) {
     if lval.index.is_empty() {
-        (symtab.get_var(&lval.ident).unwrap(), bb)
+        (symtab.get_var(&lval.ident).unwrap().0, bb)
     } else {
         let mut bb = bb;
-        let array = symtab.get_var(&lval.ident).unwrap();
+        let (array, ty) = symtab.get_var(&lval.ident).unwrap();
+        let mut current_type = match ty.kind() {
+            TypeKind::Pointer(ty) => ty.clone(),
+            _ => unreachable!(),
+        };
         let mut pointer = array;
         for index in lval.index.iter() {
             let (index, next_bb) = build_exp(func, bb, index, symtab);
             bb = next_bb;
-            pointer = new_value!(func).get_elem_ptr(pointer, index);
+            match current_type.kind() {
+                TypeKind::Array(next_ty, _) => {
+                    current_type = next_ty.clone();
+                    pointer = new_value!(func).get_elem_ptr(pointer, index);
+                }
+                TypeKind::Pointer(next_ty) => {
+                    current_type = next_ty.clone();
+                    pointer = new_value!(func).get_ptr(pointer, index);
+                }
+                _ => unimplemented!(),
+            };
             add_value(func, bb, pointer);
         }
         (pointer, bb)

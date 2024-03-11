@@ -1,7 +1,7 @@
 //! Symbol table for KoopaIR.
 
 use crate::util::Error;
-use koopa::ir::{BasicBlock, Function, Value};
+use koopa::ir::{BasicBlock, Function, Type, Value};
 use std::{
     collections::HashMap,
     sync::atomic::{AtomicUsize, Ordering},
@@ -10,7 +10,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub enum Symbol {
     Const(i32),
-    Var(Value),
+    Var(Value, Type),
 }
 
 /// Symbol table, supporting nested blocks
@@ -71,11 +71,11 @@ impl SymbolTable {
         }
     }
 
-    pub fn get_var(&self, ident: &String) -> Result<Value, Error> {
+    pub fn get_var(&self, ident: &String) -> Result<(Value, Type), Error> {
         for layer in self.data.iter().rev() {
             match layer.get(ident) {
-                Some(Symbol::Var(value)) => {
-                    return Ok(*value);
+                Some(Symbol::Var(value, ty)) => {
+                    return Ok((value.clone(), ty.clone()));
                 }
                 Some(_) => {
                     return Err(Error::ParseError(format!(
@@ -88,9 +88,9 @@ impl SymbolTable {
         Err(Error::ParseError(format!("identifier '{ident}' undefined")))
     }
 
-    pub fn insert_var(&mut self, ident: &String, value: Value) -> Result<(), Error> {
+    pub fn insert_var(&mut self, ident: &String, value: Value, ty: Type) -> Result<(), Error> {
         let data = self.data.last_mut().unwrap();
-        match data.insert(ident.clone(), Symbol::Var(value)) {
+        match data.insert(ident.clone(), Symbol::Var(value, ty)) {
             Some(_) => Err(Error::ParseError(format!("identifier '{ident}' redefined"))),
             None => Ok(()),
         }
