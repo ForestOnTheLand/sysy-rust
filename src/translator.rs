@@ -311,6 +311,9 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
             let callee_data = config.program.func(callee);
             let func_name = function_name(callee_data).unwrap();
             writeln!(output, "  call {func_name}").unwrap();
+            if !config.func_data.dfg().value(value).ty().is_unit() {
+                save_stack(value, "a0".parse().unwrap(), output, config);
+            }
         }
         ValueKind::Return(ret) => {
             match ret.value() {
@@ -373,7 +376,17 @@ fn prepare_value(
                     "x0".parse().unwrap()
                 }
             }
-            _ => unimplemented!(),
+            ValueKind::FuncArgRef(arg) => {
+                if arg.index() < 8 {
+                    Register::new(10 + arg.index() as u8).unwrap()
+                } else {
+                    let reg = config.table.get_vaccant().unwrap();
+                    let offset = config.stack_size + (arg.index() - 8) * 4;
+                    writeln!(output, "  lw {reg}, {offset}(sp)").unwrap();
+                    reg
+                }
+            }
+            e => unimplemented!("{:#?}", e),
         },
     }
 }
