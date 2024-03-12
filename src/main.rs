@@ -8,7 +8,7 @@ mod build_util;
 /// Build KoopaIR from AST
 mod builder;
 /// RISCV Register
-mod register;
+mod translate_util;
 /// Translate KoopaIR into RISCV
 mod translator;
 /// Util functions

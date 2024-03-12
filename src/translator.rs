@@ -2,7 +2,7 @@
 //! Instead of implementing a `trait` as is described in the writeup,
 //! the core of the file is implemented in the function [`translate_program`].
 
-use crate::register::*;
+use crate::translate_util::*;
 use crate::util::Error;
 use koopa::ir::{
     entities::ValueData, values::Aggregate, BasicBlock, BinaryOp, FunctionData, Program, TypeKind,
@@ -62,7 +62,7 @@ fn translate_global_value(program: &Program, value: Value, output: &mut impl io:
                         }
                     }
                 }
-                _ => unimplemented!(),
+                _ => unreachable!(),
             }
         }
         _ => panic!("internal error: expected global alloc instruction"),
@@ -108,8 +108,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, output: &mut 
             writeln!(output, "{name}:").unwrap();
         }
         for &inst in node.insts().keys() {
-            let on_stack = !func_data.dfg().value(inst).ty().is_unit();
-            translate_instruction(inst, output, &mut config, on_stack);
+            translate_instruction(inst, output, &mut config);
             writeln!(output, "").unwrap();
         }
     }
@@ -175,52 +174,89 @@ struct TranslateConfig<'a> {
 }
 
 /// Translate a single KoopaIR instruction into several RISCV instructions.
-fn translate_instruction(
-    value: Value,
-    output: &mut impl io::Write,
-    config: &mut TranslateConfig,
-    on_stack: bool,
-) {
-    // Where the result is stored
-    let reg = match config.func_data.dfg().value(value).kind() {
-        ValueKind::Integer(int) => {
-            if int.value() != 0 {
-                let reg = config.table.get_vaccant().unwrap();
-                writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
-                Some(reg)
-            } else {
-                Some(Register::new(0).unwrap())
-            }
+fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut TranslateConfig) {
+    match config.func_data.dfg().value(value).kind() {
+        ValueKind::Integer(_) => unreachable!(),
+        ValueKind::ZeroInit(_) => unreachable!(),
+        ValueKind::Undef(_) => unreachable!(),
+        ValueKind::Aggregate(_) => unreachable!(),
+        ValueKind::FuncArgRef(_) => todo!(),
+        ValueKind::BlockArgRef(_) => unreachable!(),
+        ValueKind::Alloc(_) => {
+            let size = match config.func_data.dfg().value(value).ty().kind() {
+                TypeKind::Pointer(value) => value.size(),
+                _ => unreachable!(),
+            };
+            writeln!(output, "  # at {}(sp), size {}", *config.stack_pos, size).unwrap();
+            config.symbol.store_stack_pointer(value, *config.stack_pos);
+            *config.stack_pos += size as i32;
         }
+        ValueKind::GlobalAlloc(_) => unreachable!(),
+        ValueKind::Load(load) => {
+            let reg = if load.src().is_global() {
+                let reg = config.table.get_vaccant().unwrap();
+                let value_data = config.program.borrow_value(load.src());
+                let name = global_variable_name(&value_data).unwrap();
+                writeln!(output, "  la {reg}, {name}").unwrap();
+                writeln!(output, "  lw {reg}, ({reg})").unwrap();
+                reg
+            } else {
+                let src = prepare_value(load.src(), output, config);
+                writeln!(output, "  lw {src}, ({src})").unwrap();
+                src
+            };
 
-        ValueKind::Return(ret) => {
-            match ret.value() {
-                Some(val) => {
-                    let reg = translate_i32(val, output, config);
-                    if reg.id != 10 {
-                        writeln!(output, "  mv a0, {}", reg).unwrap();
+            save_stack(value, reg, output, config);
+        }
+        ValueKind::Store(store) => match config.func_data.dfg().value(store.value()).kind() {
+            ValueKind::Aggregate(list) => {
+                assert!(!store.dest().is_global());
+                let values = local_unpack(config.func_data, list);
+                let pos = config.symbol.get_stack_pointer(&store.dest());
+                let tmp = config.table.get_vaccant().unwrap();
+                for (index, value) in values.into_iter().enumerate() {
+                    let reg = prepare_value(value, output, config);
+                    let offset = pos + (index as i32) * 4;
+                    if offset < 2048 {
+                        writeln!(output, "  sw {reg}, {offset}(sp)").unwrap();
+                    } else {
+                        writeln!(output, "  li {tmp}, {offset}").unwrap();
+                        writeln!(output, "  add {tmp}, {tmp}, sp").unwrap();
+                        writeln!(output, "  sw {reg}, ({tmp})").unwrap();
+                    }
+                    config.table.reset(reg).unwrap();
+                }
+                config.table.reset(tmp).unwrap();
+            }
+            _ => {
+                let reg = prepare_value(store.value(), output, config);
+                if store.dest().is_global() {
+                    let value_data = config.program.borrow_value(store.dest());
+                    let name = global_variable_name(&value_data).unwrap();
+                    let tmp = config.table.get_vaccant().unwrap();
+                    writeln!(output, "  la {tmp}, {name}").unwrap();
+                    writeln!(output, "  sw {reg}, ({tmp})").unwrap();
+                    config.table.reset(tmp).unwrap();
+                } else {
+                    let pos = config.symbol.get_stack_pointer(&store.dest());
+                    if pos < 2048 {
+                        writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+                    } else {
+                        let temp = config.table.get_vaccant().unwrap();
+                        writeln!(output, "  li {temp}, {pos}").unwrap();
+                        writeln!(output, "  add {reg}, sp, {temp}").unwrap();
+                        writeln!(output, "  sw {reg}, ({reg})").unwrap();
+                        config.table.reset(temp).unwrap();
                     }
                 }
-                None => {}
-            };
-            if config.save_ra {
-                writeln!(output, "  lw ra, {}(sp)", config.stack_size - 4).unwrap();
+                config.table.reset(reg).unwrap();
             }
-            if config.stack_size > 0 {
-                if config.stack_size < 2048 {
-                    writeln!(output, "  addi sp, sp, {}", config.stack_size).unwrap();
-                } else {
-                    writeln!(output, "  li t0, {}", config.stack_size).unwrap();
-                    writeln!(output, "  add sp, sp, t0").unwrap();
-                }
-            }
-            writeln!(output, "  ret").unwrap();
-            None
-        }
-
+        },
+        ValueKind::GetPtr(_) => todo!(),
+        ValueKind::GetElemPtr(_) => todo!(),
         ValueKind::Binary(bin) => {
-            let left = translate_i32(bin.lhs(), output, config);
-            let right = translate_i32(bin.rhs(), output, config);
+            let left = prepare_value(bin.lhs(), output, config);
+            let right = prepare_value(bin.rhs(), output, config);
             config.table.reset(left).unwrap();
             config.table.reset(right).unwrap();
             let res = config.table.get_vaccant().unwrap();
@@ -247,123 +283,23 @@ fn translate_instruction(
             }
             .unwrap();
 
-            Some(res)
+            save_stack(value, res, output, config);
         }
-
-        ValueKind::Alloc(_alloc) => {
-            let size = match config.func_data.dfg().value(value).ty().kind() {
-                TypeKind::Pointer(value) => value.size(),
-                _ => unreachable!(),
-            };
-            writeln!(
-                output,
-                "  # Allocated at {}(sp), size {}",
-                *config.stack_pos, size
-            )
-            .unwrap();
-            config.symbol.store_stack(value, *config.stack_pos).unwrap();
-            *config.stack_pos += size as i32;
-            return;
-        }
-
-        ValueKind::Store(store) => {
-            match config.func_data.dfg().value(store.value()).kind() {
-                ValueKind::Aggregate(list) => {
-                    assert!(!store.dest().is_global());
-                    let values = local_unpack(config.func_data, list);
-                    let pos = config.symbol.get_stack(&store.dest()).unwrap();
-                    for (index, value) in values.into_iter().enumerate() {
-                        let reg = translate_i32(value, output, config);
-                        let offset = pos + (index as i32) * 4;
-                        if offset < 2048 {
-                            writeln!(output, "  sw {reg}, {offset}(sp)").unwrap();
-                        } else {
-                            let tmp = config.table.get_vaccant().unwrap();
-                            writeln!(output, "  li {tmp}, {offset}").unwrap();
-                            writeln!(output, "  add {tmp}, {tmp}, sp").unwrap();
-                            writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
-                            config.table.reset(tmp).unwrap();
-                        }
-                        config.table.reset(reg).unwrap();
-                    }
-                }
-                _ => {
-                    let reg = translate_i32(store.value(), output, config);
-                    if store.dest().is_global() {
-                        let value_data = config.program.borrow_value(store.dest());
-                        let name = global_variable_name(&value_data).unwrap();
-                        let tmp = config.table.get_vaccant().unwrap();
-                        writeln!(output, "  la {tmp}, {name}").unwrap();
-                        writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
-                        config.table.reset(tmp).unwrap();
-                    } else {
-                        let pos = config.symbol.get_stack(&store.dest()).unwrap();
-                        if pos < 2048 {
-                            writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
-                        } else {
-                            let temp = config.table.get_vaccant().unwrap();
-                            writeln!(output, "  li {temp}, {pos}").unwrap();
-                            writeln!(output, "  add {reg}, sp, {temp}").unwrap();
-                            writeln!(output, "  sw {reg}, ({reg})").unwrap();
-                            config.table.reset(temp).unwrap();
-                        }
-                    }
-                    config.table.reset(reg).unwrap();
-                }
-            };
-
-            None
-        }
-
-        ValueKind::Load(load) => {
-            let reg = config.table.get_vaccant().unwrap();
-            if load.src().is_global() {
-                let value_data = config.program.borrow_value(load.src());
-                let name = global_variable_name(&value_data).unwrap();
-                writeln!(output, "  la {reg}, {name}").unwrap();
-                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
-            } else {
-                let pos = config.symbol.get(&load.src()).unwrap();
-                match pos {
-                    AllocPos::Stack(pos) => {
-                        let pos = *pos;
-                        if pos < 2048 {
-                            writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
-                        } else {
-                            let temp = config.table.get_vaccant().unwrap();
-                            writeln!(output, "  li {temp}, {pos}").unwrap();
-                            writeln!(output, "  add {reg}, sp, {temp}").unwrap();
-                            writeln!(output, "  sw {reg}, ({reg})").unwrap();
-                            config.table.reset(temp).unwrap();
-                        }
-                    }
-                    AllocPos::Reg(pos) => writeln!(output, "  lw {reg}, ({pos})").unwrap(),
-                    _ => unimplemented!(),
-                }
-            }
-
-            Some(reg)
-        }
-
         ValueKind::Branch(branch) => {
-            let cond = translate_i32(branch.cond(), output, config);
+            let cond = prepare_value(branch.cond(), output, config);
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
             writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
             config.table.reset(cond).unwrap();
             writeln!(output, "  j {else_tag}").unwrap();
-            None
         }
-
         ValueKind::Jump(jump) => {
             let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
             writeln!(output, "  j {jmp_tag}").unwrap();
-            None
         }
-
         ValueKind::Call(call) => {
             for (i, &arg) in call.args().iter().enumerate() {
-                let reg = translate_i32(arg, output, config);
+                let reg = prepare_value(arg, output, config);
                 if i < 8 {
                     writeln!(output, "  mv a{i}, {reg}").unwrap();
                 } else {
@@ -375,143 +311,92 @@ fn translate_instruction(
             let callee_data = config.program.func(callee);
             let func_name = function_name(callee_data).unwrap();
             writeln!(output, "  call {func_name}").unwrap();
-            Some("a0".parse().unwrap())
         }
-
-        ValueKind::FuncArgRef(arg) => {
-            if arg.index() < 8 {
-                Some(Register::new(10 + arg.index() as u8).unwrap())
-            } else {
-                let offset = config.stack_size + (arg.index() - 8) * 4;
-                config.symbol.store_stack(value, offset as i32).unwrap();
-                return;
-            }
-        }
-
-        ValueKind::GetElemPtr(get) => {
-            let tmp = config.table.get_vaccant().unwrap();
-            let s = if get.src().is_global() {
-                let value_data = config.program.borrow_value(get.src());
-                let name = global_variable_name(&value_data).unwrap();
-                writeln!(output, "  la {tmp}, {name}").unwrap();
-                match config.program.borrow_value(get.src()).ty().kind() {
-                    TypeKind::Pointer(array) => match array.kind() {
-                        TypeKind::Array(elem, _) => elem.size(),
-                        _ => unreachable!(),
-                    },
-                    _ => unreachable!(),
+        ValueKind::Return(ret) => {
+            match ret.value() {
+                Some(val) => {
+                    let reg = prepare_value(val, output, config);
+                    writeln!(output, "  mv a0, {}", reg).unwrap();
                 }
-            } else {
-                let pos = config.symbol.get_stack(&get.src()).unwrap();
-                writeln!(output, "  mv {tmp}, sp").unwrap();
-                writeln!(output, "  add {tmp}, {tmp}, {pos}").unwrap();
-                match config.func_data.dfg().value(get.src()).ty().kind() {
-                    TypeKind::Pointer(array) => match array.kind() {
-                        TypeKind::Array(elem, _) => elem.size(),
-                        _ => unreachable!(),
-                    },
-                    _ => unreachable!(),
-                }
+                None => {}
             };
-            let stride = config.table.get_vaccant().unwrap();
-            writeln!(output, "  li {stride}, {s}").unwrap();
-            let index = translate_i32(get.index(), output, config);
-            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
-            writeln!(output, "  add {tmp}, {tmp}, {index}").unwrap();
-            config.table.reset(stride).unwrap();
-            config.table.reset(index).unwrap();
-            Some(tmp)
-        }
-
-        ValueKind::GetPtr(get) => {
-            let tmp = config.table.get_vaccant().unwrap();
-
-            let pos = config.symbol.get_stack(&get.src()).unwrap();
-            writeln!(output, "  li {tmp}, sp").unwrap();
-            writeln!(output, "  add {tmp}, {tmp}, {pos}").unwrap();
-            let s = match config.func_data.dfg().value(get.src()).ty().kind() {
-                TypeKind::Pointer(array) => array.size(),
-                _ => unreachable!(),
-            };
-
-            let stride = config.table.get_vaccant().unwrap();
-            writeln!(output, "  li {stride}, {s}").unwrap();
-            let index = translate_i32(get.index(), output, config);
-            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
-            writeln!(output, "  add {tmp}, {tmp}, {index}").unwrap();
-            config.table.reset(stride).unwrap();
-            config.table.reset(index).unwrap();
-            Some(tmp)
-        }
-
-        kind => unimplemented!("unimplemented ValueKind {kind:#?}"),
-    };
-
-    if !config.func_data.dfg().value(value).ty().is_unit() {
-        let reg = reg
-            .ok_or(Error::InternalError(format!(
-                "{:#?} is non-void type",
-                config.func_data.dfg().value(value)
-            )))
-            .unwrap();
-
-        if on_stack {
-            config.symbol.store_stack(value, *config.stack_pos).unwrap();
-            config.table.reset(reg).unwrap();
-            let pos = *config.stack_pos;
-            if pos < 2048 {
-                writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
-            } else {
-                let temp = config.table.get_vaccant().unwrap();
-                writeln!(output, "  li {temp}, {pos}").unwrap();
-                writeln!(output, "  add {reg}, sp, {temp}").unwrap();
-                writeln!(output, "  sw {reg}, ({reg})").unwrap();
-                config.table.reset(temp).unwrap();
+            if config.save_ra {
+                writeln!(output, "  lw ra, {}(sp)", config.stack_size - 4).unwrap();
             }
-            *config.stack_pos += 4;
-        } else {
-            config.symbol.store_register(value, reg).unwrap();
+            if config.stack_size > 0 {
+                writeln!(output, "  li t0, {}", config.stack_size).unwrap();
+                writeln!(output, "  add sp, sp, t0").unwrap();
+            }
+            writeln!(output, "  ret").unwrap();
         }
     }
 }
 
-/// Translate an `i32` value. Store it in a register, and returns its position.
-fn translate_i32(
+fn prepare_value(
     value: Value,
     output: &mut impl io::Write,
     config: &mut TranslateConfig,
 ) -> Register {
-    // If value is already handled before, just return it directly.
-    // Note that we need to load variables on stack into register.
-    let value_data = config.func_data.dfg().value(value);
-    if !value_data.ty().is_i32() {
-        panic!(
-            "internal error: type {} cannot be parsed as i32",
-            value_data.ty()
-        );
-    }
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
+        Some(AllocPos::RegPointer(_)) => panic!("Register is not addressable"),
         Some(AllocPos::Stack(pos)) => {
             let pos = *pos;
             let reg = config.table.get_vaccant().unwrap();
             if pos < 2048 {
                 writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
             } else {
-                let temp = config.table.get_vaccant().unwrap();
-                writeln!(output, "  li {temp}, {pos}").unwrap();
-                writeln!(output, "  add {temp}, sp, {temp}").unwrap();
-                writeln!(output, "  lw {reg}, ({temp})").unwrap();
-                config.table.reset(temp).unwrap();
+                writeln!(output, "  li {reg}, {pos}").unwrap();
+                writeln!(output, "  add {reg}, sp, {reg}").unwrap();
+                writeln!(output, "  lw {reg}, ({reg})").unwrap();
             }
             reg
         }
-        Some(AllocPos::StackPointer(_)) => panic!("internal error: *i32 cannot be parsed as i32"),
-        None => {
-            translate_instruction(value, output, config, false);
-            translate_i32(value, output, config)
+        Some(AllocPos::StackPointer(pos)) => {
+            let pos = *pos;
+            let reg = config.table.get_vaccant().unwrap();
+            if pos < 2048 {
+                writeln!(output, "  addi {reg}, sp, {pos}").unwrap();
+            } else {
+                writeln!(output, "  li {reg}, {pos}").unwrap();
+                writeln!(output, "  add {reg}, sp, {reg}").unwrap();
+            }
+            reg
         }
+        None => match config.func_data.dfg().value(value).kind() {
+            ValueKind::Integer(int) => {
+                if int.value() != 0 {
+                    let reg = config.table.get_vaccant().unwrap();
+                    writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
+                    reg
+                } else {
+                    "x0".parse().unwrap()
+                }
+            }
+            _ => unimplemented!(),
+        },
     }
+}
+
+fn save_stack(
+    value: Value,
+    reg: Register,
+    output: &mut impl io::Write,
+    config: &mut TranslateConfig,
+) {
+    config.symbol.store_stack(value, *config.stack_pos);
+    config.table.reset(reg).unwrap();
+    let pos = *config.stack_pos;
+    if pos < 2048 {
+        writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+    } else {
+        let temp = config.table.get_vaccant().unwrap();
+        writeln!(output, "  li {temp}, {pos}").unwrap();
+        writeln!(output, "  add {temp}, sp, {temp}").unwrap();
+        writeln!(output, "  sw {reg}, ({temp})").unwrap();
+        config.table.reset(temp).unwrap();
+    }
+    *config.stack_pos += 4;
 }
 
 // Helper functions
