@@ -20,6 +20,7 @@ lalrpop_mod!(sysy);
 
 /// Usage: `<program> <mode> <input> -o <output_file>`
 fn main() {
+    koopa::ir::Type::set_ptr_size(4);
     let (mode, input, mut output) = util::parse_args().unwrap();
 
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
