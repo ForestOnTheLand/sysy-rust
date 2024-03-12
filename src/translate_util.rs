@@ -139,10 +139,12 @@ impl RegisterTable {
 
 /// Record the position (register or stack) of a single variable.
 pub enum AllocPos {
-    Reg(Register),        // x = %reg
-    Stack(i32),           // x = offset(%sp)
+    #[allow(dead_code)]
+    Reg(Register), // x = %reg
+    Stack(i32), // x = offset(%sp)
+    #[allow(dead_code)]
     RegPointer(Register), // x = &%reg
-    StackPointer(i32),    // x = %sp + offset = &offset(%sp)
+    StackPointer(i32), // x = %sp + offset = &offset(%sp)
 }
 
 /// Record the position (register or stack) of all variables in a function.
@@ -161,10 +163,12 @@ impl AllocTable {
         self.data.get(value)
     }
 
+    #[allow(dead_code)]
     pub fn store_register(&mut self, value: Value, reg: Register) {
         self.data.insert(value, AllocPos::Reg(reg));
     }
 
+    #[allow(dead_code)]
     pub fn store_register_pointer(&mut self, value: Value, reg: Register) {
         self.data.insert(value, AllocPos::RegPointer(reg));
     }

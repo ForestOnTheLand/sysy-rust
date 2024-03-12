@@ -158,7 +158,13 @@ fn allocate_stack(func_data: &FunctionData, output: &mut impl io::Write) -> (usi
         }
     }
     if ra != 0 {
-        writeln!(output, "  sw ra, {}(sp)", stack_size - 4).unwrap();
+        if stack_size - 4 < 2048 {
+            writeln!(output, "  sw ra, {}(sp)", stack_size - 4).unwrap();
+        } else {
+            writeln!(output, "  li t0, {stack_size}").unwrap();
+            writeln!(output, "  add t0, t0, sp").unwrap();
+            writeln!(output, "  sw ra, 0(t0)").unwrap();
+        }
     }
     (stack_size, ra != 0, (args * 4) as i32)
 }
@@ -180,7 +186,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
         ValueKind::ZeroInit(_) => unreachable!(),
         ValueKind::Undef(_) => unreachable!(),
         ValueKind::Aggregate(_) => unreachable!(),
-        ValueKind::FuncArgRef(_) => todo!(),
+        ValueKind::FuncArgRef(_) => unreachable!(),
         ValueKind::BlockArgRef(_) => unreachable!(),
         ValueKind::Alloc(_) => {
             let size = match config.func_data.dfg().value(value).ty().kind() {
@@ -198,11 +204,11 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 let value_data = config.program.borrow_value(load.src());
                 let name = global_variable_name(&value_data).unwrap();
                 writeln!(output, "  la {reg}, {name}").unwrap();
-                writeln!(output, "  lw {reg}, ({reg})").unwrap();
+                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
                 reg
             } else {
                 let src = prepare_value(load.src(), output, config);
-                writeln!(output, "  lw {src}, ({src})").unwrap();
+                writeln!(output, "  lw {src}, 0({src})").unwrap();
                 src
             };
 
@@ -222,7 +228,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                     } else {
                         writeln!(output, "  li {tmp}, {offset}").unwrap();
                         writeln!(output, "  add {tmp}, {tmp}, sp").unwrap();
-                        writeln!(output, "  sw {reg}, ({tmp})").unwrap();
+                        writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
                     }
                     config.table.reset(reg).unwrap();
                 }
@@ -235,25 +241,68 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                     let name = global_variable_name(&value_data).unwrap();
                     let tmp = config.table.get_vaccant().unwrap();
                     writeln!(output, "  la {tmp}, {name}").unwrap();
-                    writeln!(output, "  sw {reg}, ({tmp})").unwrap();
+                    writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
                     config.table.reset(tmp).unwrap();
                 } else {
-                    let pos = config.symbol.get_stack_pointer(&store.dest());
-                    if pos < 2048 {
-                        writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
-                    } else {
-                        let temp = config.table.get_vaccant().unwrap();
-                        writeln!(output, "  li {temp}, {pos}").unwrap();
-                        writeln!(output, "  add {reg}, sp, {temp}").unwrap();
-                        writeln!(output, "  sw {reg}, ({reg})").unwrap();
-                        config.table.reset(temp).unwrap();
-                    }
+                    // let pos = config.symbol.get_stack_pointer(&store.dest());
+                    let pos = prepare_value(store.dest(), output, config);
+                    writeln!(output, "  sw {reg}, 0({pos})").unwrap();
+                    config.table.reset(pos).unwrap();
                 }
                 config.table.reset(reg).unwrap();
             }
         },
-        ValueKind::GetPtr(_) => todo!(),
-        ValueKind::GetElemPtr(_) => todo!(),
+        ValueKind::GetPtr(get) => {
+            assert!(!get.src().is_global());
+            let reg = prepare_value(get.src(), output, config);
+            let s = match config.func_data.dfg().value(get.src()).ty().kind() {
+                TypeKind::Pointer(ty) => ty.size(),
+                _ => unreachable!(),
+            };
+            let stride = config.table.get_vaccant().unwrap();
+            writeln!(output, "  li {stride}, {s}").unwrap();
+            let index = prepare_value(get.index(), output, config);
+            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
+            writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
+            config.table.reset(stride).unwrap();
+            config.table.reset(index).unwrap();
+            save_stack(value, reg, output, config);
+        }
+        ValueKind::GetElemPtr(get) => {
+            let (reg, s) = if get.src().is_global() {
+                let tmp = config.table.get_vaccant().unwrap();
+                let value_data = config.program.borrow_value(get.src());
+                let name = global_variable_name(&value_data).unwrap();
+                writeln!(output, "  la {tmp}, {name}").unwrap();
+                let s = match config.program.borrow_value(get.src()).ty().kind() {
+                    TypeKind::Pointer(array) => match array.kind() {
+                        TypeKind::Array(elem, _) => elem.size(),
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                };
+                (tmp, s)
+            } else {
+                let pos = prepare_value(get.src(), output, config);
+                let s = match config.func_data.dfg().value(get.src()).ty().kind() {
+                    TypeKind::Pointer(array) => match array.kind() {
+                        TypeKind::Array(elem, _) => elem.size(),
+                        _ => unreachable!(),
+                    },
+                    _ => unreachable!(),
+                };
+                (pos, s)
+            };
+            let stride = config.table.get_vaccant().unwrap();
+            writeln!(output, "  li {stride}, {s}").unwrap();
+            let index = prepare_value(get.index(), output, config);
+            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
+            writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
+            config.table.reset(stride).unwrap();
+            config.table.reset(index).unwrap();
+            save_stack(value, reg, output, config);
+        }
+
         ValueKind::Binary(bin) => {
             let left = prepare_value(bin.lhs(), output, config);
             let right = prepare_value(bin.rhs(), output, config);
@@ -270,9 +319,13 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 BinaryOp::And => writeln!(output, "  and {res}, {left}, {right}"),
                 BinaryOp::Or => writeln!(output, "  or {res}, {left}, {right}"),
                 BinaryOp::Lt => writeln!(output, "  slt {res}, {left}, {right}"),
-                BinaryOp::Le => writeln!(output, "  sgt {res}, {right}, {left}"),
+                BinaryOp::Le => {
+                    writeln!(output, "  sgt {res}, {left}, {right}\n  seqz {res}, {left}")
+                }
                 BinaryOp::Gt => writeln!(output, "  sgt {res}, {left}, {right}"),
-                BinaryOp::Ge => writeln!(output, "  slt {res}, {right}, {left}"),
+                BinaryOp::Ge => {
+                    writeln!(output, "  slt {res}, {left}, {right}\n  seqz {res}, {left}")
+                }
                 BinaryOp::Eq => {
                     writeln!(output, "  xor {res}, {left}, {right}\n  seqz {res}, {left}")
                 }
@@ -323,12 +376,24 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 }
                 None => {}
             };
+            let stack_size = config.stack_size;
+
             if config.save_ra {
-                writeln!(output, "  lw ra, {}(sp)", config.stack_size - 4).unwrap();
+                if stack_size - 4 < 2048 {
+                    writeln!(output, "  lw ra, {}(sp)", stack_size - 4).unwrap();
+                } else {
+                    writeln!(output, "  li t0, {stack_size}").unwrap();
+                    writeln!(output, "  add t0, t0, sp").unwrap();
+                    writeln!(output, "  lw ra, 0(t0)").unwrap();
+                }
             }
-            if config.stack_size > 0 {
-                writeln!(output, "  li t0, {}", config.stack_size).unwrap();
-                writeln!(output, "  add sp, sp, t0").unwrap();
+            if stack_size > 0 {
+                if stack_size < 2048 {
+                    writeln!(output, "  addi sp, sp, {}", stack_size).unwrap();
+                } else {
+                    writeln!(output, "  li t0, {}", stack_size).unwrap();
+                    writeln!(output, "  add sp, sp, t0").unwrap();
+                }
             }
             writeln!(output, "  ret").unwrap();
         }
@@ -351,7 +416,7 @@ fn prepare_value(
             } else {
                 writeln!(output, "  li {reg}, {pos}").unwrap();
                 writeln!(output, "  add {reg}, sp, {reg}").unwrap();
-                writeln!(output, "  lw {reg}, ({reg})").unwrap();
+                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
             }
             reg
         }
@@ -398,7 +463,6 @@ fn save_stack(
     config: &mut TranslateConfig,
 ) {
     config.symbol.store_stack(value, *config.stack_pos);
-    config.table.reset(reg).unwrap();
     let pos = *config.stack_pos;
     if pos < 2048 {
         writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
@@ -406,9 +470,10 @@ fn save_stack(
         let temp = config.table.get_vaccant().unwrap();
         writeln!(output, "  li {temp}, {pos}").unwrap();
         writeln!(output, "  add {temp}, sp, {temp}").unwrap();
-        writeln!(output, "  sw {reg}, ({temp})").unwrap();
+        writeln!(output, "  sw {reg}, 0({temp})").unwrap();
         config.table.reset(temp).unwrap();
     }
+    config.table.reset(reg).unwrap();
     *config.stack_pos += 4;
 }
 
