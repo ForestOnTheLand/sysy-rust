@@ -6,6 +6,9 @@ Cargo.lock
 /test
 /out
 
+# My tool
+/tools
+
 # VSCode configuration
 /.vscode
 
