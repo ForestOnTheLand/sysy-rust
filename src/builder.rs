@@ -108,13 +108,13 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
 
     if shape.is_empty() {
-        symtab.insert_const(&def.ident, data[0]).unwrap();
+        symtab.insert_const(def.ident.clone(), data[0]).unwrap();
     } else {
         let value = global_packing(program, &data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
         let ty = program.borrow_value(array).ty().clone();
-        symtab.insert_var(&def.ident, array, ty).unwrap();
+        symtab.insert_var(def.ident.clone(), array, ty).unwrap();
     }
 }
 
@@ -146,7 +146,7 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
     let var = program.new_value().global_alloc(data);
     program.set_value_name(var, Some(format!("@{}", def.ident)));
     let ty = program.borrow_value(var).ty().clone();
-    symtab.insert_var(&def.ident, var, ty).unwrap();
+    symtab.insert_var(def.ident.clone(), var, ty).unwrap();
 }
 
 /// Write a [`FuncDef`] into a program.
@@ -233,7 +233,9 @@ fn build_params(
         let store = new_value!(func).store(value, p);
         add_value(func, bb, store);
         let ty = func.dfg().value(p).ty().clone();
-        symtab.insert_var(&params.params[i].ident, p, ty).unwrap();
+        symtab
+            .insert_var(params.params[i].ident.clone(), p, ty)
+            .unwrap();
     }
 }
 
@@ -314,7 +316,7 @@ fn build_var_def(
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.layer_id())));
     add_value(func, bb, var);
     let ty = func.dfg().value(var).ty().clone();
-    symtab.insert_var(&def.ident, var, ty).unwrap();
+    symtab.insert_var(def.ident.clone(), var, ty).unwrap();
     if let Some(init_value) = &def.init_val {
         let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
         let value = local_packing(func, values, &shape);
@@ -412,7 +414,7 @@ fn build_const_def(
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
 
     if shape.is_empty() {
-        symtab.insert_const(&def.ident, data[0]).unwrap();
+        symtab.insert_const(def.ident.clone(), data[0]).unwrap();
     } else {
         let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
         let value = local_packing(func, values, &shape);
@@ -426,7 +428,7 @@ fn build_const_def(
             Some(format!("@{}_{}", &def.ident, symtab.layer_id())),
         );
         let ty = func.dfg().value(array).ty().clone();
-        symtab.insert_var(&def.ident, array, ty).unwrap();
+        symtab.insert_var(def.ident.clone(), array, ty).unwrap();
     }
 }
 

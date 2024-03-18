@@ -52,7 +52,7 @@ pub fn parse_args() -> Result<(Mode, String, fs::File), Error> {
     let mode = args.next().ok_or(Error::MissingArgumentError)?;
     let mode = match &mode as &str {
         "-koopa" => Mode::Koopa,
-        "-riscv" => Mode::RiscV,
+        "-riscv" | "-perf" => Mode::RiscV,
         _ => return Err(Error::ModeError(mode)),
     };
     let input = args.next().ok_or(Error::MissingArgumentError)?;

@@ -65,7 +65,7 @@ impl SymbolTable {
         Err(Error::ParseError(format!("identifier '{ident}' undefined")))
     }
 
-    pub fn insert_const(&mut self, ident: &String, value: i32) -> Result<(), Error> {
+    pub fn insert_const(&mut self, ident: String, value: i32) -> Result<(), Error> {
         let data = self.data.last_mut().unwrap();
         match data.insert(ident.clone(), Symbol::Const(value)) {
             Some(_previous) => Err(Error::ParseError(format!(
@@ -93,7 +93,7 @@ impl SymbolTable {
         Err(Error::ParseError(format!("identifier '{ident}' undefined")))
     }
 
-    pub fn insert_var(&mut self, ident: &String, value: Value, ty: Type) -> Result<(), Error> {
+    pub fn insert_var(&mut self, ident: String, value: Value, ty: Type) -> Result<(), Error> {
         let data = self.data.last_mut().unwrap();
         match data.insert(ident.clone(), Symbol::Var(value, ty)) {
             Some(_) => Err(Error::ParseError(format!("identifier '{ident}' redefined"))),
