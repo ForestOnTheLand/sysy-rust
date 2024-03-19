@@ -3,7 +3,7 @@
 use crate::ast::*;
 use crate::build_util::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
-use koopa::ir::{builder_traits::*, TypeKind};
+use koopa::ir::{builder_traits::*, TypeKind, ValueKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
 use std::io;
@@ -838,6 +838,18 @@ fn build_mul_exp(
         MulExp::Binary(left, op, right) => {
             let (left, bb) = build_mul_exp(func, bb, left, symtab);
             let (right, bb) = build_unary_exp(func, bb, right, symtab);
+            if let Some(left_value) = get_integer(func, left) {
+                if let Some(right_value) = get_integer(func, right) {
+                    return (
+                        new_value!(func).integer(match op {
+                            MulOp::Mul => left_value * right_value,
+                            MulOp::Div => left_value / right_value,
+                            MulOp::Mod => left_value % right_value,
+                        } as i32),
+                        bb,
+                    );
+                }
+            }
             let value = new_value!(func).binary(
                 match op {
                     MulOp::Mul => BinaryOp::Mul,
@@ -864,6 +876,17 @@ fn build_add_exp(
         AddExp::Binary(left, op, right) => {
             let (left, bb) = build_add_exp(func, bb, left, symtab);
             let (right, bb) = build_mul_exp(func, bb, right, symtab);
+            if let Some(left_value) = get_integer(func, left) {
+                if let Some(right_value) = get_integer(func, right) {
+                    return (
+                        new_value!(func).integer(match op {
+                            AddOp::Add => left_value + right_value,
+                            AddOp::Sub => left_value - right_value,
+                        } as i32),
+                        bb,
+                    );
+                }
+            }
             let value = new_value!(func).binary(
                 match op {
                     AddOp::Add => BinaryOp::Add,
@@ -889,6 +912,19 @@ fn build_rel_exp(
         RelExp::Binary(left, op, right) => {
             let (left, bb) = build_rel_exp(func, bb, left, symtab);
             let (right, bb) = build_add_exp(func, bb, right, symtab);
+            if let Some(left_value) = get_integer(func, left) {
+                if let Some(right_value) = get_integer(func, right) {
+                    return (
+                        new_value!(func).integer(match op {
+                            RelOp::Lt => left_value < right_value,
+                            RelOp::Le => left_value <= right_value,
+                            RelOp::Gt => left_value > right_value,
+                            RelOp::Ge => left_value >= right_value,
+                        } as i32),
+                        bb,
+                    );
+                }
+            }
             let value = new_value!(func).binary(
                 match op {
                     RelOp::Lt => BinaryOp::Lt,
@@ -916,6 +952,17 @@ fn build_eq_exp(
         EqExp::Binary(left, op, right) => {
             let (left, bb) = build_eq_exp(func, bb, left, symtab);
             let (right, bb) = build_rel_exp(func, bb, right, symtab);
+            if let Some(left_value) = get_integer(func, left) {
+                if let Some(right_value) = get_integer(func, right) {
+                    return (
+                        new_value!(func).integer(match op {
+                            EqOp::Eq => left_value == right_value,
+                            EqOp::Neq => left_value != right_value,
+                        } as i32),
+                        bb,
+                    );
+                }
+            }
             let value = new_value!(func).binary(
                 match op {
                     EqOp::Eq => BinaryOp::Eq,
@@ -946,13 +993,28 @@ fn build_land_exp(
     match exp {
         LAndExp::Single(exp) => build_eq_exp(func, bb, exp, symtab),
         LAndExp::Binary(left, right) => {
-            let result = new_value!(func).alloc(Type::get_i32());
-            add_value(func, bb, result);
             let zero = new_value!(func).integer(0);
-            let assign = new_value!(func).store(zero, result);
-            add_value(func, bb, assign);
 
             let (left, bb) = build_land_exp(func, bb, left, symtab);
+
+            if let Some(left_value) = get_integer(func, left) {
+                if left_value == 0 {
+                    return (zero, bb);
+                } else {
+                    let (right, bb) = build_eq_exp(func, bb, right, symtab);
+                    if let Some(right_value) = get_integer(func, right) {
+                        return (new_value!(func).integer((right_value != 0) as i32), bb);
+                    }
+                    let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+                    add_value(func, bb, right);
+                    return (right, bb);
+                }
+            }
+
+            let result = new_value!(func).alloc(Type::get_i32());
+            add_value(func, bb, result);
+            let assign = new_value!(func).store(zero, result);
+            add_value(func, bb, assign);
 
             let id = symtab.get_id();
             let and = new_bb(func, format!("%and_{id}"));
@@ -963,9 +1025,13 @@ fn build_land_exp(
             add_value(func, bb, branch);
 
             let (right, bb) = build_eq_exp(func, and, right, symtab);
-            let zero = new_value!(func).integer(0);
-            let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-            add_value(func, bb, right);
+            let right = if let Some(right_value) = get_integer(func, right) {
+                new_value!(func).integer((right_value != 0) as i32)
+            } else {
+                let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+                add_value(func, bb, right);
+                right
+            };
             let assign = new_value!(func).store(right, result);
             add_value(func, bb, assign);
             let jmp = new_value!(func).jump(end_and);
@@ -998,12 +1064,25 @@ fn build_lor_exp(
             let zero = new_value!(func).integer(0);
             let one = new_value!(func).integer(1);
 
+            let (left, bb) = build_lor_exp(func, bb, left, symtab);
+
+            if let Some(left_value) = get_integer(func, left) {
+                if left_value != 0 {
+                    return (one, bb);
+                }
+                let (right, bb) = build_land_exp(func, bb, right, symtab);
+                if let Some(right_value) = get_integer(func, right) {
+                    return (if right_value == 0 { zero } else { one }, bb);
+                }
+                let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+                add_value(func, bb, right);
+                return (right, bb);
+            }
+
             let result = new_value!(func).alloc(Type::get_i32());
             add_value(func, bb, result);
             let assign = new_value!(func).store(one, result);
             add_value(func, bb, assign);
-
-            let (left, bb) = build_lor_exp(func, bb, left, symtab);
 
             let id = symtab.get_id();
             let or = new_bb(func, format!("%or_{id}"));
@@ -1014,8 +1093,13 @@ fn build_lor_exp(
             add_value(func, bb, branch);
 
             let (right, bb) = build_land_exp(func, or, right, symtab);
-            let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-            add_value(func, bb, right);
+            let right = if let Some(right_value) = get_integer(func, right) {
+                new_value!(func).integer((right_value != 0) as i32)
+            } else {
+                let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
+                add_value(func, bb, right);
+                right
+            };
             let assign = new_value!(func).store(right, result);
             add_value(func, bb, assign);
             let jmp = new_value!(func).jump(end_or);
@@ -1129,4 +1213,9 @@ fn compute_shape(shape: &Vec<Box<ConstExp>>, symtab: &SymbolTable) -> Vec<usize>
         .collect()
 }
 
-// fn get_integer(val: Value) ->
+fn get_integer(func: &FunctionData, val: Value) -> Option<i32> {
+    match func.dfg().value(val).kind() {
+        ValueKind::Integer(i) => Some(i.value()),
+        _ => None,
+    }
+}
