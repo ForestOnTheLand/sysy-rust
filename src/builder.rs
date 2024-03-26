@@ -20,9 +20,7 @@ pub fn output_program(program: &Program, output: impl io::Write) {
     KoopaGenerator::new(output).generate_on(program).unwrap();
 }
 
-/// One of the core features. Parse an AST into a KoopaIR Program, which calls
-/// - [`declare_builtins`]
-/// - [`build_comp_unit`]
+/// One of the core features. Parse an AST into a KoopaIR Program.
 pub fn build_program(comp_unit: &CompUnit) -> Program {
     let mut program = Program::new();
     let mut symtab = SymbolTable::new();
@@ -71,15 +69,13 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     }
 }
 
-/// Write a [`CompUnit`] into a program,
-/// with functions [`build_global_decl`], [`build_function`] and **itself** used.
+/// Write a [`CompUnit`] into a program.
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
-    match comp_unit.item.as_ref() {
-        GlobalItem::Decl(decl) => build_global_decl(program, decl, symtab),
-        GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
-    };
-    if let Some(c) = &comp_unit.comp_unit {
-        build_comp_unit(program, c, symtab);
+    for item in comp_unit.items.iter() {
+        match item.as_ref() {
+            GlobalItem::Decl(decl) => build_global_decl(program, decl, symtab),
+            GlobalItem::FuncDef(func_def) => build_function(program, func_def, symtab),
+        }
     }
 }
 
@@ -786,7 +782,7 @@ fn build_exp(
                         );
                     }
                 }
-                let value = new_value!(func).binary(op.as_op(), left, right);
+                let value = new_value!(func).binary(op.clone().into(), left, right);
                 add_value(func, bb, value);
                 (value, bb)
             }

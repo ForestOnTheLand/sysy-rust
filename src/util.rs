@@ -1,8 +1,7 @@
 //! Small tools, including
-//! - [`Error`] for all possible errors happening in this program
 //! - [`parse_args`] for parsing arguments
 
-use std::{env, fmt, fs, io};
+use std::{env, fs, io};
 
 #[derive(Debug)]
 pub enum Error {
@@ -11,34 +10,6 @@ pub enum Error {
     IOError(io::Error),
     InternalError(String),
     ParseError(String),
-}
-
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::MissingArgumentError => {
-                writeln!(f, "Usage: <program> <mode> <input-file> -o <output-file>")
-            }
-            Error::ModeError(mode) => {
-                writeln!(
-                    f,
-                    r#"Unsupported mode '{}', expected in:
-(1) -koopa: generates KoopaIR
-(2) -riscv: generates RISCV"#,
-                    mode
-                )
-            }
-            Error::IOError(err) => {
-                writeln!(f, "IO error: {}", err)
-            }
-            Error::InternalError(msg) => {
-                writeln!(f, "internal error: {}", msg)
-            }
-            Error::ParseError(msg) => {
-                writeln!(f, "parse error: {}", msg)
-            }
-        }
-    }
 }
 
 pub enum Mode {

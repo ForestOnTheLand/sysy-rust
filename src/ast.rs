@@ -8,8 +8,6 @@
 //! in order to eliminate ambiguity and conflict.
 //!
 
-use koopa::ir::BinaryOp;
-
 /// [`BuiltinType`] `::=` `"void"` | `"int"`
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuiltinType {
@@ -17,11 +15,10 @@ pub enum BuiltinType {
     Int,
 }
 
-/// [`CompUnit`] `::=` [`GlobalItem`] [[`CompUnit`]]
+/// [`CompUnit`] `::=` {[`GlobalItem`]}
 #[derive(Debug)]
 pub struct CompUnit {
-    pub item: Box<GlobalItem>,
-    pub comp_unit: Option<Box<CompUnit>>,
+    pub items: Vec<Box<GlobalItem>>,
 }
 
 /// [`GlobalItem`] `::=` [`GlobalDecl`] | [`FuncDef`]
@@ -229,7 +226,7 @@ impl UnaryOp {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum BinaryOperator {
     NotEq,
     Eq,
@@ -272,9 +269,12 @@ impl BinaryOperator {
             BinaryOperator::Sar => unimplemented!(),
         }
     }
+}
 
-    pub fn as_op(&self) -> BinaryOp {
-        match self {
+impl From<BinaryOperator> for koopa::ir::BinaryOp {
+    fn from(value: BinaryOperator) -> Self {
+        use koopa::ir::BinaryOp;
+        match value {
             BinaryOperator::NotEq => BinaryOp::NotEq,
             BinaryOperator::Eq => BinaryOp::Eq,
             BinaryOperator::Gt => BinaryOp::Gt,
