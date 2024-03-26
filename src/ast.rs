@@ -8,6 +8,8 @@
 //! in order to eliminate ambiguity and conflict.
 //!
 
+use koopa::ir::BinaryOp;
+
 /// [`BuiltinType`] `::=` `"void"` | `"int"`
 #[derive(Debug, PartialEq, Eq)]
 pub enum BuiltinType {
@@ -180,8 +182,9 @@ pub struct ConstExp {
 
 /// [`Exp`] `::=` [`UnaryExp`]
 #[derive(Debug)]
-pub struct Exp {
-    pub lor_exp: Box<LOrExp>,
+pub enum Exp {
+    Single(Box<UnaryExp>),
+    Binary(Box<Exp>, BinaryOperator, Box<Exp>),
 }
 
 /// [`PrimaryExp`] `::=` `"("` [`Exp`] `")"` | [`LVal`] | `Number`
@@ -208,7 +211,7 @@ pub struct FuncRParams {
     pub exps: Vec<Box<Exp>>,
 }
 
-/// [`UnaryOp`] `::=` `"+"` | `"-"` | `"!"`
+/// [`UnaryOperator`] `::=` `"+"` | `"-"` | `"!"`
 #[derive(Debug)]
 pub enum UnaryOp {
     Pos,
@@ -216,71 +219,79 @@ pub enum UnaryOp {
     Not,
 }
 
-/// [`MulExp`] `::=` [`UnaryExp`] | [`MulExp`] (`"*"` | `"/"` | `"%"`) [`UnaryExp`]
-#[derive(Debug)]
-pub enum MulExp {
-    Single(Box<UnaryExp>),
-    Binary(Box<MulExp>, MulOp, Box<UnaryExp>),
+impl UnaryOp {
+    pub fn compute(&self, operand: i32) -> i32 {
+        match self {
+            UnaryOp::Pos => operand,
+            UnaryOp::Neg => -operand,
+            UnaryOp::Not => (operand == 0) as i32,
+        }
+    }
 }
 
 #[derive(Debug)]
-pub enum MulOp {
+pub enum BinaryOperator {
+    NotEq,
+    Eq,
+    Gt,
+    Lt,
+    Ge,
+    Le,
+    Add,
+    Sub,
     Mul,
     Div,
     Mod,
+    And,
+    Or,
+    Xor,
+    Shl,
+    Shr,
+    Sar,
 }
 
-/// [`AddExp`] `::=` [`MulExp`] | [`AddExp`] (`"+"` | `"-"`) [`MulExp`]
-#[derive(Debug)]
-pub enum AddExp {
-    Single(Box<MulExp>),
-    Binary(Box<AddExp>, AddOp, Box<MulExp>),
-}
+impl BinaryOperator {
+    pub fn compute(&self, left: i32, right: i32) -> i32 {
+        match self {
+            BinaryOperator::NotEq => (left != right) as i32,
+            BinaryOperator::Eq => (left == right) as i32,
+            BinaryOperator::Gt => (left > right) as i32,
+            BinaryOperator::Lt => (left < right) as i32,
+            BinaryOperator::Ge => (left >= right) as i32,
+            BinaryOperator::Le => (left <= right) as i32,
+            BinaryOperator::Add => left + right,
+            BinaryOperator::Sub => left - right,
+            BinaryOperator::Mul => left * right,
+            BinaryOperator::Div => left / right,
+            BinaryOperator::Mod => left % right,
+            BinaryOperator::And => (left != 0 && right != 0) as i32,
+            BinaryOperator::Or => (left != 0 || right != 0) as i32,
+            BinaryOperator::Xor => left ^ right,
+            BinaryOperator::Shl => unimplemented!(),
+            BinaryOperator::Shr => unimplemented!(),
+            BinaryOperator::Sar => unimplemented!(),
+        }
+    }
 
-#[derive(Debug)]
-pub enum AddOp {
-    Add,
-    Sub,
-}
-
-/// [`RelExp`] `::=` [`AddExp`] | [`RelExp`] (`"<"` | `">"` | `"<="` | `">="`) [`AddExp`]
-#[derive(Debug)]
-pub enum RelExp {
-    Single(Box<AddExp>),
-    Binary(Box<RelExp>, RelOp, Box<AddExp>),
-}
-
-#[derive(Debug)]
-pub enum RelOp {
-    Lt,
-    Gt,
-    Le,
-    Ge,
-}
-
-/// [`EqExp`] `::=` [`RelExp`] | [`EqExp`] (`"=="` | `"!="`) [`RelExp`]
-#[derive(Debug)]
-pub enum EqExp {
-    Single(Box<RelExp>),
-    Binary(Box<EqExp>, EqOp, Box<RelExp>),
-}
-
-#[derive(Debug)]
-pub enum EqOp {
-    Eq,
-    Neq,
-}
-
-/// [`LAndExp`] `::=` [`EqExp`] | [`LAndExp`] `"&&"` [`EqExp`]
-#[derive(Debug)]
-pub enum LAndExp {
-    Single(Box<EqExp>),
-    Binary(Box<LAndExp>, Box<EqExp>),
-}
-
-/// [`LOrExp`] `::=` [`LAndExp`] | [`LOrExp`] `"||"` [`LAndExp`]
-#[derive(Debug)]
-pub enum LOrExp {
-    Single(Box<LAndExp>),
-    Binary(Box<LOrExp>, Box<LAndExp>),
+    pub fn as_op(&self) -> BinaryOp {
+        match self {
+            BinaryOperator::NotEq => BinaryOp::NotEq,
+            BinaryOperator::Eq => BinaryOp::Eq,
+            BinaryOperator::Gt => BinaryOp::Gt,
+            BinaryOperator::Lt => BinaryOp::Lt,
+            BinaryOperator::Ge => BinaryOp::Ge,
+            BinaryOperator::Le => BinaryOp::Le,
+            BinaryOperator::Add => BinaryOp::Add,
+            BinaryOperator::Sub => BinaryOp::Sub,
+            BinaryOperator::Mul => BinaryOp::Mul,
+            BinaryOperator::Div => BinaryOp::Div,
+            BinaryOperator::Mod => BinaryOp::Mod,
+            BinaryOperator::And => BinaryOp::And,
+            BinaryOperator::Or => BinaryOp::Or,
+            BinaryOperator::Xor => BinaryOp::Xor,
+            BinaryOperator::Shl => BinaryOp::Shl,
+            BinaryOperator::Shr => BinaryOp::Shr,
+            BinaryOperator::Sar => BinaryOp::Sar,
+        }
+    }
 }
