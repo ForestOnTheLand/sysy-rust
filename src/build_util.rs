@@ -33,7 +33,7 @@ impl SymbolTable {
             data: vec![HashMap::new()],
             loops: Vec::new(),
             function: HashMap::new(),
-            counter: AtomicUsize::new(1000),
+            counter: AtomicUsize::new(1),
         }
     }
 

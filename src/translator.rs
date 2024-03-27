@@ -484,9 +484,9 @@ fn block_name(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
     let name = func.dfg().bb(bb).name().as_ref();
     let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
     let name = name
-        .strip_prefix("%")
+        .strip_prefix("%koopa_builtin_")
         .ok_or(Error::InternalError(format!(
-            "invalid function name '{name}' generated in koopa, expected to begin with '%'"
+            "invalid function name '{name}' generated in koopa, expected to begin with '%koopa_builtin_'"
         )))?
         .to_string();
     Ok(name)

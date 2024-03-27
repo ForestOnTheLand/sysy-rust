@@ -154,7 +154,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
         .insert_function(func_def.ident.clone(), func)
         .unwrap();
 
-    let bb = new_bb(func_data, "%entry".into());
+    let bb = new_bb(func_data, "%koopa_builtin_entry".into());
     add_bb(func_data, bb);
 
     if let Some(params) = func_def.params.as_ref() {
@@ -221,7 +221,7 @@ fn build_params(
 ) {
     for i in 0..params.params.len() {
         let value = func.params()[i];
-        let ident = format!("%{}_p", params.params[i].ident);
+        let ident = format!("%{}", params.params[i].ident);
         let ty = func.dfg().value(value).ty().clone();
         let p = new_value!(func).alloc(ty);
         func.dfg_mut().set_value_name(p, Some(ident.clone()));
@@ -568,7 +568,7 @@ fn build_stmt(
                 add_value(func, bb, ret);
             }
             let id = symtab.get_id();
-            let end_bb = new_bb(func, format!("%unused_{id}"));
+            let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
             // add_bb(func, end_bb);
             end_bb
         }
@@ -586,9 +586,9 @@ fn build_stmt(
         Stmt::Condition(cond, true_branch, false_branch) => {
             let id = symtab.get_id();
             let (cond, bb) = build_exp(func, bb, cond, symtab);
-            let end_bb = new_bb(func, format!("%endif_{id}"));
+            let end_bb = new_bb(func, format!("%koopa_builtin_end_if_{id}"));
 
-            let true_bb = new_bb(func, format!("%then_{id}"));
+            let true_bb = new_bb(func, format!("%koopa_builtin_then_{id}"));
             add_bb(func, true_bb);
             let true_end = build_stmt(func, true_bb, true_branch, symtab);
             let true_jmp = new_value!(func).jump(end_bb);
@@ -596,7 +596,7 @@ fn build_stmt(
 
             let else_bb = {
                 if let Some(false_branch) = false_branch {
-                    let false_bb = new_bb(func, format!("%else_{id}"));
+                    let false_bb = new_bb(func, format!("%koopa_builtin_else_{id}"));
                     add_bb(func, false_bb);
                     let false_end = build_stmt(func, false_bb, false_branch, symtab);
                     add_bb(func, end_bb);
@@ -615,9 +615,9 @@ fn build_stmt(
 
         Stmt::While(exp, stmt) => {
             let id = symtab.get_id();
-            let entry = new_bb(func, format!("%while_entry_{id}"));
+            let entry = new_bb(func, format!("%koopa_builtin_while_entry_{id}"));
             add_bb(func, entry);
-            let end = new_bb(func, format!("%while_end_{id}"));
+            let end = new_bb(func, format!("%koopa_builtin_while_end_{id}"));
 
             symtab.enter_loop(entry, end);
 
@@ -625,7 +625,7 @@ fn build_stmt(
             add_value(func, bb, enter);
             let (cond, end_entry) = build_exp(func, entry, exp, symtab);
 
-            let body = new_bb(func, format!("%while_body_{id}"));
+            let body = new_bb(func, format!("%koopa_builtin_while_body_{id}"));
             add_bb(func, body);
             let end_body = build_stmt(func, body, stmt, symtab);
             let jump = new_value!(func).jump(entry);
@@ -646,7 +646,7 @@ fn build_stmt(
             let target = symtab.loop_end().unwrap();
             let jump = new_value!(func).jump(target);
             add_value(func, bb, jump);
-            let end_bb = new_bb(func, format!("%unused_{id}"));
+            let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
             end_bb
         }
 
@@ -655,7 +655,7 @@ fn build_stmt(
             let target = symtab.loop_entry().unwrap();
             let jump = new_value!(func).jump(target);
             add_value(func, bb, jump);
-            let end_bb = new_bb(func, format!("%unused_{id}"));
+            let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
             end_bb
         }
     }
@@ -695,9 +695,9 @@ fn build_exp(
                 add_value(func, bb, assign);
 
                 let id = symtab.get_id();
-                let and = new_bb(func, format!("%and_{id}"));
+                let and = new_bb(func, format!("%koopa_builtin_and_{id}"));
                 add_bb(func, and);
-                let end_and = new_bb(func, format!("%endand_{id}"));
+                let end_and = new_bb(func, format!("%koopa_builtin_end_and_{id}"));
 
                 let branch = new_value!(func).branch(left, and, end_and);
                 add_value(func, bb, branch);
@@ -745,9 +745,9 @@ fn build_exp(
                 add_value(func, bb, assign);
 
                 let id = symtab.get_id();
-                let or = new_bb(func, format!("%or_{id}"));
+                let or = new_bb(func, format!("%koopa_builtin_or_{id}"));
                 add_bb(func, or);
-                let end_or = new_bb(func, format!("%endor_{id}"));
+                let end_or = new_bb(func, format!("%koopa_builtin_end_or_{id}"));
 
                 let branch = new_value!(func).branch(left, end_or, or);
                 add_value(func, bb, branch);
@@ -873,7 +873,7 @@ fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
         .name()
         .as_ref()
         .expect("basic blocks should have a non-default name")
-        .starts_with("%unused")
+        .starts_with("%koopa_builtin_unused")
 }
 
 /// Add a new instruction into a basic block.
