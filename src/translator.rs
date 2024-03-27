@@ -161,7 +161,7 @@ fn allocate_stack(func_data: &FunctionData, output: &mut impl io::Write) -> (usi
         if stack_size - 4 < 2048 {
             writeln!(output, "  sw ra, {}(sp)", stack_size - 4).unwrap();
         } else {
-            writeln!(output, "  li t0, {stack_size}").unwrap();
+            writeln!(output, "  li t0, {}", stack_size - 4).unwrap();
             writeln!(output, "  add t0, t0, sp").unwrap();
             writeln!(output, "  sw ra, 0(t0)").unwrap();
         }
@@ -383,7 +383,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 if stack_size - 4 < 2048 {
                     writeln!(output, "  lw ra, {}(sp)", stack_size - 4).unwrap();
                 } else {
-                    writeln!(output, "  li t0, {stack_size}").unwrap();
+                    writeln!(output, "  li t0, {}", stack_size - 4).unwrap();
                     writeln!(output, "  add t0, t0, sp").unwrap();
                     writeln!(output, "  lw ra, 0(t0)").unwrap();
                 }
