@@ -373,6 +373,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 Some(val) => {
                     let reg = prepare_value(val, output, config);
                     writeln!(output, "  mv a0, {}", reg).unwrap();
+                    config.table.reset(reg).unwrap();
                 }
                 None => {}
             };
