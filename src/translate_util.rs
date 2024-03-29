@@ -3,7 +3,6 @@
 //! We will use a trivial policy: use at most 12 registers for variables,
 //! and if there are more variables, allocate them on stack.
 
-use crate::util::Error;
 use koopa::ir::Value;
 use std::collections::HashMap;
 use std::{fmt, str};
@@ -23,14 +22,11 @@ const REG_NAME: [&str; 32] = [
 ];
 
 impl Register {
-    pub fn new(id: u8) -> Result<Register, Error> {
-        if id < 32 {
-            Ok(Register { id })
-        } else {
-            Err(Error::InternalError(format!(
-                "register id '{id}' out of range"
-            )))
+    pub fn new(id: u8) -> Register {
+        if id >= 32 {
+            panic!("register id '{id}' out of range")
         }
+        Register { id }
     }
 
     #[allow(dead_code)]
@@ -46,7 +42,7 @@ impl fmt::Display for Register {
 }
 
 impl str::FromStr for Register {
-    type Err = Error;
+    type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let id = match s {
             "x0" => 0,
@@ -81,9 +77,9 @@ impl str::FromStr for Register {
             "t4" => 29,
             "t5" => 30,
             "t6" => 31,
-            _ => return Err(Error::InternalError(format!("Invalid register name '{s}'"))),
+            _ => return Err(format!("internal error: invalid register name '{s}'")),
         };
-        Ok(Register::new(id as u8).unwrap())
+        Ok(Register { id })
     }
 }
 
@@ -104,31 +100,26 @@ impl RegisterTable {
         }
     }
 
-    pub fn get_vaccant(&mut self) -> Result<Register, Error> {
+    pub fn get_vaccant(&mut self) -> Register {
         for id in TMP_REG {
             if !self.state[id as usize] {
                 self.state[id as usize] = true;
                 self.available -= 1;
-                return Register::new(id);
+                return Register { id };
             }
         }
-        Err(Error::InternalError(
-            "no available registers now".to_string(),
-        ))
+        panic!("no available registers now");
     }
 
-    pub fn reset(&mut self, reg: Register) -> Result<(), Error> {
+    pub fn reset(&mut self, reg: Register) {
         if !TMP_REG.contains(&reg.id) {
-            Ok(())
-        } else if self.state[reg.id as usize] {
+            return;
+        }
+        if self.state[reg.id as usize] {
             self.state[reg.id as usize] = false;
             self.available += 1;
-            Ok(())
-        } else {
-            Err(Error::InternalError(format!(
-                "register {reg} is not being occupied now"
-            )))
         }
+        panic!("register {reg} is not being occupied now");
     }
 
     #[allow(dead_code)]

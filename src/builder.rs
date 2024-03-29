@@ -65,7 +65,7 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     for (name, params_ty, ret_ty) in builtin_functions {
         let data = FunctionData::new_decl(format!("@{name}"), params_ty, ret_ty);
         let function = program.new_func(data);
-        symtab.insert_function(name, function).unwrap();
+        symtab.insert_function(name, function);
     }
 }
 
@@ -104,13 +104,13 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
 
     if shape.is_empty() {
-        symtab.insert_const(def.ident.clone(), data[0]).unwrap();
+        symtab.insert_const(def.ident.clone(), data[0]);
     } else {
         let value = global_packing(program, &data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
         let ty = program.borrow_value(array).ty().clone();
-        symtab.insert_var(def.ident.clone(), array, ty).unwrap();
+        symtab.insert_var(def.ident.clone(), array, ty);
     }
 }
 
@@ -142,7 +142,7 @@ fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut 
     let var = program.new_value().global_alloc(data);
     program.set_value_name(var, Some(format!("@{}", def.ident)));
     let ty = program.borrow_value(var).ty().clone();
-    symtab.insert_var(def.ident.clone(), var, ty).unwrap();
+    symtab.insert_var(def.ident.clone(), var, ty);
 }
 
 /// Write a [`FuncDef`] into a program.
@@ -150,9 +150,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
     symtab.enter_block();
     let (func, ret) = parse_function(program, func_def, symtab);
     let func_data = program.func_mut(func);
-    symtab
-        .insert_function(func_def.ident.clone(), func)
-        .unwrap();
+    symtab.insert_function(func_def.ident.clone(), func);
 
     let bb = new_bb(func_data, "%koopa_builtin_entry".into());
     add_bb(func_data, bb);
@@ -172,7 +170,7 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
             add_value(func_data, bb, ret);
         }
     }
-    symtab.quit_block().unwrap();
+    symtab.quit_block();
 }
 
 /// Initialize a [`FunctionData`] with a given [`FuncDef`].
@@ -229,9 +227,7 @@ fn build_params(
         let store = new_value!(func).store(value, p);
         add_value(func, bb, store);
         let ty = func.dfg().value(p).ty().clone();
-        symtab
-            .insert_var(params.params[i].ident.clone(), p, ty)
-            .unwrap();
+        symtab.insert_var(params.params[i].ident.clone(), p, ty);
     }
 }
 
@@ -247,7 +243,7 @@ fn build_block(
     for block_item in block.block_items.iter() {
         next_bb = build_block_item(func, next_bb, block_item, symtab);
     }
-    symtab.quit_block().unwrap();
+    symtab.quit_block();
     next_bb
 }
 
@@ -312,7 +308,7 @@ fn build_var_def(
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.layer_id())));
     add_value(func, bb, var);
     let ty = func.dfg().value(var).ty().clone();
-    symtab.insert_var(def.ident.clone(), var, ty).unwrap();
+    symtab.insert_var(def.ident.clone(), var, ty);
     if let Some(init_value) = &def.init_val {
         let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
         let value = local_packing(func, values, &shape);
@@ -410,7 +406,7 @@ fn build_const_def(
     let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
 
     if shape.is_empty() {
-        symtab.insert_const(def.ident.clone(), data[0]).unwrap();
+        symtab.insert_const(def.ident.clone(), data[0]);
     } else {
         let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
         let value = local_packing(func, values, &shape);
@@ -424,7 +420,7 @@ fn build_const_def(
             Some(format!("@{}_{}", &def.ident, symtab.layer_id())),
         );
         let ty = func.dfg().value(array).ty().clone();
-        symtab.insert_var(def.ident.clone(), array, ty).unwrap();
+        symtab.insert_var(def.ident.clone(), array, ty);
     }
 }
 
@@ -500,7 +496,7 @@ fn compute_primary_exp(exp: &PrimaryExp, symtab: &SymbolTable) -> i32 {
     match exp {
         PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
         PrimaryExp::Number(val) => *val,
-        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident).unwrap(),
+        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident),
     }
 }
 
@@ -511,7 +507,7 @@ fn build_lval(
     symtab: &SymbolTable,
 ) -> (Value, BasicBlock, Type) {
     let mut bb = bb;
-    let (array, ty) = symtab.get_var(&lval.ident).unwrap();
+    let (array, ty) = symtab.get_var(&lval.ident);
     let mut current_type = match ty.kind() {
         TypeKind::Pointer(ty) => ty.clone(),
         _ => unreachable!(),
@@ -636,14 +632,14 @@ fn build_stmt(
             let branch = new_value!(func).branch(cond, body, end);
             add_value(func, end_entry, branch);
 
-            symtab.quit_loop().unwrap();
+            symtab.quit_loop();
 
             end
         }
 
         Stmt::Break => {
             let id = symtab.get_id();
-            let target = symtab.loop_end().unwrap();
+            let target = symtab.loop_end();
             let jump = new_value!(func).jump(target);
             add_value(func, bb, jump);
             let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
@@ -652,7 +648,7 @@ fn build_stmt(
 
         Stmt::Continue => {
             let id = symtab.get_id();
-            let target = symtab.loop_entry().unwrap();
+            let target = symtab.loop_entry();
             let jump = new_value!(func).jump(target);
             add_value(func, bb, jump);
             let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
@@ -829,7 +825,7 @@ fn build_unary_exp(
                     args.push(value);
                 }
             }
-            let result = new_value!(func).call(symtab.get_function(ident).unwrap(), args);
+            let result = new_value!(func).call(symtab.get_function(ident), args);
             add_value(func, bb, result);
             (result, bb)
         }
@@ -845,7 +841,7 @@ fn build_primary_exp(
     match exp {
         PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
         PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
-        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident).unwrap() {
+        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident) {
             Symbol::Const(val) => (new_value!(func).integer(val), bb),
             _ => {
                 let (pos, bb, ty) = build_lval(func, bb, lval, symtab);

@@ -1,6 +1,5 @@
 //! Utils for generating KoopaIR.
 
-use crate::util::Error;
 use koopa::ir::{BasicBlock, Function, Type, Value};
 use std::{
     collections::HashMap,
@@ -41,91 +40,67 @@ impl SymbolTable {
         self.data.push(HashMap::new());
     }
 
-    pub fn quit_block(&mut self) -> Result<(), Error> {
-        self.data.pop().ok_or(Error::InternalError(
-            "symbol table gets empty before it should be".to_string(),
-        ))?;
-        Ok(())
+    pub fn quit_block(&mut self) {
+        self.data
+            .pop()
+            .expect("internal error: symbol table should not be empty now");
     }
 
-    pub fn get_const(&self, ident: &String) -> Result<i32, Error> {
+    pub fn get_const(&self, ident: &String) -> i32 {
         for layer in self.data.iter().rev() {
             match layer.get(ident) {
-                Some(Symbol::Const(value)) => {
-                    return Ok(*value);
-                }
-                Some(_) => {
-                    return Err(Error::ParseError(format!(
-                        "expected '{ident}' to be a constant"
-                    )));
-                }
+                Some(Symbol::Const(value)) => return value.clone(),
+                Some(_) => panic!("cannot evaluate '{ident}' at compile time"),
                 None => {}
             }
         }
-        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+        panic!("identifier '{ident}' undefined");
     }
 
-    pub fn insert_const(&mut self, ident: String, value: i32) -> Result<(), Error> {
+    pub fn insert_const(&mut self, ident: String, value: i32) {
         let data = self.data.last_mut().unwrap();
-        match data.insert(ident.clone(), Symbol::Const(value)) {
-            Some(_previous) => Err(Error::ParseError(format!(
-                "identifier '{}' redefined",
-                ident
-            ))),
-            None => Ok(()),
+        if let Some(_) = data.insert(ident.clone(), Symbol::Const(value)) {
+            panic!("identifier '{ident}' redefined")
         }
     }
 
-    pub fn get_var(&self, ident: &String) -> Result<(Value, Type), Error> {
+    pub fn get_var(&self, ident: &String) -> (Value, Type) {
         for layer in self.data.iter().rev() {
             match layer.get(ident) {
-                Some(Symbol::Var(value, ty)) => {
-                    return Ok((value.clone(), ty.clone()));
-                }
-                Some(_) => {
-                    return Err(Error::ParseError(format!(
-                        "expected '{ident}' to be an variable"
-                    )));
-                }
+                Some(Symbol::Var(value, ty)) => return (value.clone(), ty.clone()),
+                Some(_) => panic!("expected '{ident}' to be an variable"),
                 None => {}
             }
         }
-        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+        panic!("identifier '{ident}' undefined")
     }
 
-    pub fn insert_var(&mut self, ident: String, value: Value, ty: Type) -> Result<(), Error> {
+    pub fn insert_var(&mut self, ident: String, value: Value, ty: Type) {
         let data = self.data.last_mut().unwrap();
-        match data.insert(ident.clone(), Symbol::Var(value, ty)) {
-            Some(_) => Err(Error::ParseError(format!("identifier '{ident}' redefined"))),
-            None => Ok(()),
+        if let Some(_) = data.insert(ident.clone(), Symbol::Var(value, ty)) {
+            panic!("identifier '{ident}' redefined")
         }
     }
 
-    pub fn get_symbol(&self, ident: &String) -> Result<Symbol, Error> {
+    pub fn get_symbol(&self, ident: &String) -> Symbol {
         for layer in self.data.iter().rev() {
-            match layer.get(ident) {
-                Some(symbol) => {
-                    return Ok(symbol.clone());
-                }
-                None => {}
+            if let Some(symbol) = layer.get(ident) {
+                return symbol.clone();
             }
         }
-        Err(Error::ParseError(format!("identifier '{ident}' undefined")))
+        panic!("identifier '{ident}' undefined");
     }
 
-    pub fn insert_function(&mut self, ident: String, function: Function) -> Result<(), Error> {
+    pub fn insert_function(&mut self, ident: String, function: Function) {
         if let Some(_) = self.function.insert(ident.clone(), function) {
-            Err(Error::ParseError(format!("function '{ident}' redefined")))
-        } else {
-            Ok(())
+            panic!("function '{ident}' redefined")
         }
     }
 
-    pub fn get_function(&self, ident: &String) -> Result<Function, Error> {
-        if let Some(f) = self.function.get(ident) {
-            Ok(*f)
-        } else {
-            Err(Error::ParseError(format!("function '{ident}' undefined")))
+    pub fn get_function(&self, ident: &String) -> Function {
+        match self.function.get(ident) {
+            Some(f) => f.clone(),
+            None => panic!("function '{ident}' undefined"),
         }
     }
 
@@ -141,31 +116,24 @@ impl SymbolTable {
         self.loops.push((entry, end));
     }
 
-    pub fn quit_loop(&mut self) -> Result<(), Error> {
-        self.loops.pop().ok_or(Error::InternalError(
-            "loop table gets empty before it should be".to_string(),
-        ))?;
-        Ok(())
+    pub fn quit_loop(&mut self) {
+        self.loops
+            .pop()
+            .expect("internal error: loop table should not be empty now");
     }
 
-    pub fn loop_entry(&self) -> Result<BasicBlock, Error> {
-        Ok(self
-            .loops
+    pub fn loop_entry(&self) -> BasicBlock {
+        self.loops
             .last()
-            .ok_or(Error::ParseError(
-                "invalid `continue` instruction found".to_string(),
-            ))?
-            .0)
+            .expect("invalid `continue` instruction found")
+            .0
     }
 
-    pub fn loop_end(&self) -> Result<BasicBlock, Error> {
-        Ok(self
-            .loops
+    pub fn loop_end(&self) -> BasicBlock {
+        self.loops
             .last()
-            .ok_or(Error::ParseError(
-                "invalid `break` instruction found".to_string(),
-            ))?
-            .1)
+            .expect("invalid `break` instruction found")
+            .1
     }
 
     pub fn get_id(&self) -> usize {

@@ -3,7 +3,6 @@
 //! the core of the file is implemented in the function [`translate_program`].
 
 use crate::translate_util::*;
-use crate::util::Error;
 use koopa::ir::{
     entities::ValueData, values::Aggregate, BasicBlock, BinaryOp, FunctionData, Program, TypeKind,
     Value, ValueKind,
@@ -116,7 +115,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, output: &mut 
 
 /// Getting the stack size needed for a given function.
 /// The algorithm is described in detail in
-/// [writeup](https://pku-minic.github.io/online-doc/#/lv8-func-n-global/func-def-n-call?id=%e7%94%9f%e6%88%90%e4%bb%a3%e7%a0%81).
+/// [writeup](https://pku-minic.github.io/online-doc/#/lv8-func-n-global/func-def-n-call?id=生成代码).
 ///
 /// Basically, there are 3 different usage of stack space:
 /// - space for local variable
@@ -200,7 +199,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
         ValueKind::GlobalAlloc(_) => unreachable!(),
         ValueKind::Load(load) => {
             let reg = if load.src().is_global() {
-                let reg = config.table.get_vaccant().unwrap();
+                let reg = config.table.get_vaccant();
                 let value_data = config.program.borrow_value(load.src());
                 let name = global_variable_name(&value_data).unwrap();
                 writeln!(output, "  la {reg}, {name}").unwrap();
@@ -219,7 +218,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 assert!(!store.dest().is_global());
                 let values = local_unpack(config.func_data, list);
                 let pos = config.symbol.get_stack_pointer(&store.dest());
-                let tmp = config.table.get_vaccant().unwrap();
+                let tmp = config.table.get_vaccant();
                 for (index, value) in values.into_iter().enumerate() {
                     let reg = prepare_value(value, output, config);
                     let offset = pos + (index as i32) * 4;
@@ -230,26 +229,26 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                         writeln!(output, "  add {tmp}, {tmp}, sp").unwrap();
                         writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
                     }
-                    config.table.reset(reg).unwrap();
+                    config.table.reset(reg);
                 }
-                config.table.reset(tmp).unwrap();
+                config.table.reset(tmp);
             }
             _ => {
                 let reg = prepare_value(store.value(), output, config);
                 if store.dest().is_global() {
                     let value_data = config.program.borrow_value(store.dest());
                     let name = global_variable_name(&value_data).unwrap();
-                    let tmp = config.table.get_vaccant().unwrap();
+                    let tmp = config.table.get_vaccant();
                     writeln!(output, "  la {tmp}, {name}").unwrap();
                     writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
-                    config.table.reset(tmp).unwrap();
+                    config.table.reset(tmp);
                 } else {
                     // let pos = config.symbol.get_stack_pointer(&store.dest());
                     let pos = prepare_value(store.dest(), output, config);
                     writeln!(output, "  sw {reg}, 0({pos})").unwrap();
-                    config.table.reset(pos).unwrap();
+                    config.table.reset(pos);
                 }
-                config.table.reset(reg).unwrap();
+                config.table.reset(reg);
             }
         },
         ValueKind::GetPtr(get) => {
@@ -259,18 +258,18 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 TypeKind::Pointer(ty) => ty.size(),
                 _ => unreachable!(),
             };
-            let stride = config.table.get_vaccant().unwrap();
+            let stride = config.table.get_vaccant();
             writeln!(output, "  li {stride}, {s}").unwrap();
             let index = prepare_value(get.index(), output, config);
             writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
             writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
-            config.table.reset(stride).unwrap();
-            config.table.reset(index).unwrap();
+            config.table.reset(stride);
+            config.table.reset(index);
             save_stack(value, reg, output, config);
         }
         ValueKind::GetElemPtr(get) => {
             let (reg, s) = if get.src().is_global() {
-                let tmp = config.table.get_vaccant().unwrap();
+                let tmp = config.table.get_vaccant();
                 let value_data = config.program.borrow_value(get.src());
                 let name = global_variable_name(&value_data).unwrap();
                 writeln!(output, "  la {tmp}, {name}").unwrap();
@@ -293,22 +292,22 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 };
                 (pos, s)
             };
-            let stride = config.table.get_vaccant().unwrap();
+            let stride = config.table.get_vaccant();
             writeln!(output, "  li {stride}, {s}").unwrap();
             let index = prepare_value(get.index(), output, config);
             writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
             writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
-            config.table.reset(stride).unwrap();
-            config.table.reset(index).unwrap();
+            config.table.reset(stride);
+            config.table.reset(index);
             save_stack(value, reg, output, config);
         }
 
         ValueKind::Binary(bin) => {
             let left = prepare_value(bin.lhs(), output, config);
             let right = prepare_value(bin.rhs(), output, config);
-            config.table.reset(left).unwrap();
-            config.table.reset(right).unwrap();
-            let res = config.table.get_vaccant().unwrap();
+            config.table.reset(left);
+            config.table.reset(right);
+            let res = config.table.get_vaccant();
 
             match bin.op() {
                 BinaryOp::Add => writeln!(output, "  add {res}, {left}, {right}"),
@@ -343,7 +342,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
             writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
-            config.table.reset(cond).unwrap();
+            config.table.reset(cond);
             writeln!(output, "  j {else_tag}").unwrap();
         }
         ValueKind::Jump(jump) => {
@@ -358,7 +357,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 } else {
                     writeln!(output, "  sw {reg}, {}(sp)", (i - 8) * 4).unwrap();
                 }
-                config.table.reset(reg).unwrap();
+                config.table.reset(reg);
             }
             let callee = call.callee();
             let callee_data = config.program.func(callee);
@@ -373,7 +372,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 Some(val) => {
                     let reg = prepare_value(val, output, config);
                     writeln!(output, "  mv a0, {}", reg).unwrap();
-                    config.table.reset(reg).unwrap();
+                    config.table.reset(reg);
                 }
                 None => {}
             };
@@ -411,7 +410,7 @@ fn prepare_value(
         Some(AllocPos::RegPointer(_)) => panic!("Register is not addressable"),
         Some(AllocPos::Stack(pos)) => {
             let pos = *pos;
-            let reg = config.table.get_vaccant().unwrap();
+            let reg = config.table.get_vaccant();
             if pos < 2048 {
                 writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
             } else {
@@ -423,7 +422,7 @@ fn prepare_value(
         }
         Some(AllocPos::StackPointer(pos)) => {
             let pos = *pos;
-            let reg = config.table.get_vaccant().unwrap();
+            let reg = config.table.get_vaccant();
             if pos < 2048 {
                 writeln!(output, "  addi {reg}, sp, {pos}").unwrap();
             } else {
@@ -435,7 +434,7 @@ fn prepare_value(
         None => match config.func_data.dfg().value(value).kind() {
             ValueKind::Integer(int) => {
                 if int.value() != 0 {
-                    let reg = config.table.get_vaccant().unwrap();
+                    let reg = config.table.get_vaccant();
                     writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
                     reg
                 } else {
@@ -444,9 +443,9 @@ fn prepare_value(
             }
             ValueKind::FuncArgRef(arg) => {
                 if arg.index() < 8 {
-                    Register::new(10 + arg.index() as u8).unwrap()
+                    Register::new(10 + arg.index() as u8)
                 } else {
-                    let reg = config.table.get_vaccant().unwrap();
+                    let reg = config.table.get_vaccant();
                     let offset = config.stack_size + (arg.index() - 8) * 4;
                     writeln!(output, "  lw {reg}, {offset}(sp)").unwrap();
                     reg
@@ -468,58 +467,33 @@ fn save_stack(
     if pos < 2048 {
         writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
     } else {
-        let temp = config.table.get_vaccant().unwrap();
+        let temp = config.table.get_vaccant();
         writeln!(output, "  li {temp}, {pos}").unwrap();
         writeln!(output, "  add {temp}, sp, {temp}").unwrap();
         writeln!(output, "  sw {reg}, 0({temp})").unwrap();
-        config.table.reset(temp).unwrap();
+        config.table.reset(temp);
     }
-    config.table.reset(reg).unwrap();
+    config.table.reset(reg);
     *config.stack_pos += 4;
 }
 
 // Helper functions
 
-/// Get the name of a basic block, without leading '%'
-fn block_name(func: &FunctionData, bb: BasicBlock) -> Result<String, Error> {
-    let name = func.dfg().bb(bb).name().as_ref();
-    let name = name.ok_or(Error::InternalError(format!("Missing block name")))?;
-    let name = name
-        .strip_prefix("%koopa_builtin_")
-        .ok_or(Error::InternalError(format!(
-            "invalid function name '{name}' generated in koopa, expected to begin with '%koopa_builtin_'"
-        )))?
-        .to_string();
-    Ok(name)
+/// Get the name of a basic block, without leading '%koopa_builtin_'
+fn block_name(func: &FunctionData, bb: BasicBlock) -> Option<String> {
+    let name = func.dfg().bb(bb).name().as_ref()?;
+    Some(name.strip_prefix("%koopa_builtin_")?.to_string())
 }
 
 /// Get the name of a function, without leading '@'
-fn function_name(func_data: &FunctionData) -> Result<String, Error> {
-    Ok(func_data
-        .name()
-        .strip_prefix("@")
-        .ok_or(Error::InternalError(format!(
-            "invalid function name '{}' generated in koopa, expected to begin with '@'",
-            func_data.name()
-        )))?
-        .to_string())
+fn function_name(func_data: &FunctionData) -> Option<String> {
+    Some(func_data.name().strip_prefix("@")?.to_string())
 }
 
 /// Get the name of a global variable, without leading '@'
-fn global_variable_name(value_data: &ValueData) -> Result<String, Error> {
-    let name = value_data
-        .name()
-        .as_ref()
-        .ok_or(Error::InternalError(format!(
-            "missing global variable name in koopa"
-        )))?;
-    Ok(name
-        .strip_prefix("@")
-        .ok_or(Error::InternalError(format!(
-            "invalid function name '{}' generated in koopa, expected to begin with '@'",
-            name
-        )))?
-        .to_string())
+fn global_variable_name(value_data: &ValueData) -> Option<String> {
+    let name = value_data.name().as_ref()?;
+    Some(name.strip_prefix("@")?.to_string())
 }
 
 fn unpack(program: &Program, list: &Aggregate) -> Vec<Value> {
