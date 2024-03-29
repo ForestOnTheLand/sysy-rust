@@ -52,13 +52,20 @@ fn translate_global_value(program: &Program, value: Value, output: &mut impl io:
                 ValueKind::ZeroInit(_) => writeln!(output, "  .zero {}", size).unwrap(),
                 ValueKind::Integer(i) => writeln!(output, "  .word {}", i.value()).unwrap(),
                 ValueKind::Aggregate(list) => {
-                    let values = unpack(program, list);
+                    let values = global_unpack(program, list);
+                    let mut zero_counter = 0;
                     for value in values {
-                        if let ValueKind::Integer(i) = program.borrow_value(value).kind() {
-                            writeln!(output, "  .word {}", i.value()).unwrap()
+                        if value != 0 {
+                            if zero_counter != 0 {
+                                writeln!(output, "  .zero {zero_counter}").unwrap();
+                            }
+                            writeln!(output, "  .word {value}").unwrap();
                         } else {
-                            unreachable!()
+                            zero_counter += 4;
                         }
+                    }
+                    if zero_counter != 0 {
+                        writeln!(output, "  .zero {zero_counter}").unwrap();
                     }
                 }
                 _ => unreachable!(),
@@ -496,15 +503,18 @@ fn global_variable_name(value_data: &ValueData) -> Option<String> {
     Some(name.strip_prefix("@")?.to_string())
 }
 
-fn unpack(program: &Program, list: &Aggregate) -> Vec<Value> {
+fn global_unpack(program: &Program, list: &Aggregate) -> Vec<i32> {
     let mut data = Vec::new();
     for &elem in list.elems() {
         match program.borrow_value(elem).kind() {
             ValueKind::Aggregate(sublist) => {
-                data.extend(unpack(program, sublist));
+                data.extend(global_unpack(program, sublist));
             }
             ValueKind::Integer(_) => {
-                data.push(elem.clone());
+                data.push(match program.borrow_value(elem.clone()).kind() {
+                    ValueKind::Integer(i) => i.value(),
+                    _ => unreachable!(),
+                });
             }
             _ => unreachable!(),
         }

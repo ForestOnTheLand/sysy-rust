@@ -118,8 +118,9 @@ impl RegisterTable {
         if self.state[reg.id as usize] {
             self.state[reg.id as usize] = false;
             self.available += 1;
+        } else {
+            panic!("register {reg} is not being occupied now");
         }
-        panic!("register {reg} is not being occupied now");
     }
 
     #[allow(dead_code)]
