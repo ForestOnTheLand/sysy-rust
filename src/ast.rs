@@ -180,25 +180,10 @@ pub struct ConstExp {
 /// [`Exp`] `::=` [`UnaryExp`]
 #[derive(Debug)]
 pub enum Exp {
-    Single(Box<UnaryExp>),
-    Binary(Box<Exp>, BinaryOperator, Box<Exp>),
-}
-
-/// [`PrimaryExp`] `::=` `"("` [`Exp`] `")"` | [`LVal`] | `Number`
-#[derive(Debug)]
-pub enum PrimaryExp {
-    Expression(Box<Exp>),
     LVal(LVal),
     Number(i32),
-}
-
-/// [`UnaryExp`] `::=` [`PrimaryExp`]
-///            | [`UnaryOp`] [`UnaryExp`]
-///            | `IDENT` `"("` [[`FuncRParams`]] `")"`
-#[derive(Debug)]
-pub enum UnaryExp {
-    Single(Box<PrimaryExp>),
-    Unary(UnaryOp, Box<UnaryExp>),
+    Binary(Box<Exp>, BinaryOperator, Box<Exp>),
+    Unary(UnaryOperator, Box<Exp>),
     Call(String, Option<Box<FuncRParams>>),
 }
 
@@ -210,18 +195,18 @@ pub struct FuncRParams {
 
 /// [`UnaryOperator`] `::=` `"+"` | `"-"` | `"!"`
 #[derive(Debug)]
-pub enum UnaryOp {
+pub enum UnaryOperator {
     Pos,
     Neg,
     Not,
 }
 
-impl UnaryOp {
+impl UnaryOperator {
     pub fn compute(&self, operand: i32) -> i32 {
         match self {
-            UnaryOp::Pos => operand,
-            UnaryOp::Neg => -operand,
-            UnaryOp::Not => (operand == 0) as i32,
+            UnaryOperator::Pos => operand,
+            UnaryOperator::Neg => -operand,
+            UnaryOperator::Not => (operand == 0) as i32,
         }
     }
 }

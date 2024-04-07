@@ -141,31 +141,32 @@ ConstExp: Box<ConstExp> = <exp: Exp> => Box::new(ConstExp { <> });
 // Exp ::= LOrExp;
 Exp: Box<Exp> = <lor_exp: LOrExp> => <>;
 // PrimaryExp ::= "(" Exp ")" | LVal | Number;
-PrimaryExp: Box<PrimaryExp> = {
-    "(" <Exp> ")" => Box::new(PrimaryExp::Expression( <> )),
-    LVal => Box::new(PrimaryExp::LVal( <> )),
-    Number => Box::new(PrimaryExp::Number( <> )),
+PrimaryExp: Box<Exp> = {
+    "(" <Exp> ")" => <>,
+    <LVal> => Box::new(Exp::LVal( <> )),
+    <Number> => Box::new(Exp::Number( <> )),
 }
+
 // UnaryExp ::= PrimaryExp | UnaryOp UnaryExp | IDENT "(" [FuncRParams] ")";
-UnaryExp: Box<UnaryExp> = {
-    PrimaryExp => Box::new(UnaryExp::Single( <> )),
-    UnaryOp UnaryExp => Box::new(UnaryExp::Unary( <> )),
-    <Ident> "(" <FuncRParams?> ")" => Box::new(UnaryExp::Call( <> )),
+UnaryExp: Box<Exp> = {
+    <PrimaryExp> => <>,
+    <UnaryOperator> <UnaryExp> => Box::new(Exp::Unary( <> )),
+    <Ident> "(" <FuncRParams?> ")" => Box::new(Exp::Call( <> )),
 }
 // FuncRParams ::= Exp {"," Exp}
 FuncRParams: Box<FuncRParams> = <exps: Comma<Exp>> => Box::new(FuncRParams { <> });
 // UnaryOp ::= "+" | "-" | "!";
-UnaryOp: UnaryOp = {
-    "+" => UnaryOp::Pos,
-    "-" => UnaryOp::Neg,
-    "!" => UnaryOp::Not,
+UnaryOperator: UnaryOperator = {
+    "+" => UnaryOperator::Pos,
+    "-" => UnaryOperator::Neg,
+    "!" => UnaryOperator::Not,
 }
 // MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
 MulExp: Box<Exp> = {
-    <UnaryExp> => Box::new(Exp::Single( <> )),
-    <left: MulExp> "*" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mul, Box::new(Exp::Single(right)))),
-    <left: MulExp> "/" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Div, Box::new(Exp::Single(right)))),
-    <left: MulExp> "%" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mod, Box::new(Exp::Single(right)))),
+    <UnaryExp> => <>,
+    <left: MulExp> "*" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mul, right)),
+    <left: MulExp> "/" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Div, right)),
+    <left: MulExp> "%" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mod, right)),
 }
 // AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
 AddExp: Box<Exp> = {

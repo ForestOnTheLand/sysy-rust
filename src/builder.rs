@@ -472,31 +472,13 @@ fn compute_const_exp(exp: &ConstExp, symtab: &SymbolTable) -> i32 {
 
 fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
     match exp {
-        Exp::Single(exp) => compute_unary_exp(exp, symtab),
+        Exp::Unary(op, exp) => op.compute(compute_exp(exp, symtab)),
         Exp::Binary(left, op, right) => {
             op.compute(compute_exp(left, symtab), compute_exp(right, symtab))
         }
-    }
-}
-
-fn compute_unary_exp(exp: &UnaryExp, symtab: &SymbolTable) -> i32 {
-    match exp {
-        UnaryExp::Single(exp) => compute_primary_exp(exp, symtab),
-        UnaryExp::Unary(op, exp) => {
-            let val = compute_unary_exp(exp, symtab);
-            op.compute(val)
-        }
-        UnaryExp::Call(_, _) => {
-            panic!("cannot evaluate function at compile time");
-        }
-    }
-}
-
-fn compute_primary_exp(exp: &PrimaryExp, symtab: &SymbolTable) -> i32 {
-    match exp {
-        PrimaryExp::Expression(exp) => compute_exp(exp, symtab),
-        PrimaryExp::Number(val) => *val,
-        PrimaryExp::LVal(lval) => symtab.get_const(&lval.ident),
+        Exp::Call(_, _) => panic!("cannot evaluate function at compile time"),
+        Exp::LVal(lval) => symtab.get_const(&lval.ident),
+        Exp::Number(val) => val.clone(),
     }
 }
 
@@ -664,7 +646,63 @@ fn build_exp(
     symtab: &SymbolTable,
 ) -> (Value, BasicBlock) {
     match exp {
-        Exp::Single(exp) => build_unary_exp(func, bb, exp, symtab),
+        // Build a single number
+        Exp::Number(num) => (new_value!(func).integer(*num), bb),
+        // Build a left value
+        Exp::LVal(lval) => match symtab.get_symbol(&lval.ident) {
+            Symbol::Const(val) => (new_value!(func).integer(val), bb),
+            _ => {
+                let (pos, bb, ty) = build_lval(func, bb, lval, symtab);
+                if matches!(ty.kind(), TypeKind::Array(_, _)) {
+                    let zero = new_value!(func).integer(0);
+                    let pos = new_value!(func).get_elem_ptr(pos, zero);
+                    add_value(func, bb, pos);
+                    (pos, bb)
+                } else {
+                    let load = new_value!(func).load(pos);
+                    add_value(func, bb, load);
+                    (load, bb)
+                }
+            }
+        },
+        // Build unary expression
+        Exp::Unary(op, exp) => {
+            let (value, bb) = build_exp(func, bb, exp, symtab);
+            if let Some(val) = get_integer(func, value) {
+                return (new_value!(func).integer(op.compute(val)), bb);
+            }
+            match op {
+                UnaryOperator::Pos => (value, bb),
+                UnaryOperator::Neg => {
+                    let zero = new_value!(func).integer(0);
+                    let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
+                    add_value(func, bb, neg);
+                    (neg, bb)
+                }
+                UnaryOperator::Not => {
+                    let zero = new_value!(func).integer(0);
+                    let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
+                    add_value(func, bb, not);
+                    (not, bb)
+                }
+            }
+        }
+        // Build a function call
+        Exp::Call(ident, params) => {
+            let mut bb = bb;
+            let mut args = Vec::new();
+            if let Some(params) = params {
+                for param in params.exps.iter() {
+                    let (value, next_bb) = build_exp(func, bb, param, symtab);
+                    bb = next_bb;
+                    args.push(value);
+                }
+            }
+            let result = new_value!(func).call(symtab.get_function(ident), args);
+            add_value(func, bb, result);
+            (result, bb)
+        }
+        // Build a binary expression
         Exp::Binary(left, op, right) => match op {
             BinaryOperator::And => {
                 let zero = new_value!(func).integer(0);
@@ -781,80 +819,6 @@ fn build_exp(
                 let value = new_value!(func).binary(op.clone().into(), left, right);
                 add_value(func, bb, value);
                 (value, bb)
-            }
-        },
-    }
-}
-
-fn build_unary_exp(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    exp: &UnaryExp,
-    symtab: &SymbolTable,
-) -> (Value, BasicBlock) {
-    match exp {
-        UnaryExp::Single(exp) => build_primary_exp(func, bb, exp, symtab),
-        UnaryExp::Unary(op, exp) => {
-            let (value, bb) = build_unary_exp(func, bb, exp, symtab);
-            if let Some(val) = get_integer(func, value) {
-                return (new_value!(func).integer(op.compute(val)), bb);
-            }
-            match op {
-                UnaryOp::Pos => (value, bb),
-                UnaryOp::Neg => {
-                    let zero = new_value!(func).integer(0);
-                    let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
-                    add_value(func, bb, neg);
-                    (neg, bb)
-                }
-                UnaryOp::Not => {
-                    let zero = new_value!(func).integer(0);
-                    let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
-                    add_value(func, bb, not);
-                    (not, bb)
-                }
-            }
-        }
-        UnaryExp::Call(ident, params) => {
-            let mut bb = bb;
-            let mut args = Vec::new();
-            if let Some(params) = params {
-                for param in params.exps.iter() {
-                    let (value, next_bb) = build_exp(func, bb, param, symtab);
-                    bb = next_bb;
-                    args.push(value);
-                }
-            }
-            let result = new_value!(func).call(symtab.get_function(ident), args);
-            add_value(func, bb, result);
-            (result, bb)
-        }
-    }
-}
-
-fn build_primary_exp(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    exp: &PrimaryExp,
-    symtab: &SymbolTable,
-) -> (Value, BasicBlock) {
-    match exp {
-        PrimaryExp::Expression(exp) => build_exp(func, bb, exp.as_ref(), symtab),
-        PrimaryExp::Number(num) => (new_value!(func).integer(*num), bb),
-        PrimaryExp::LVal(lval) => match symtab.get_symbol(&lval.ident) {
-            Symbol::Const(val) => (new_value!(func).integer(val), bb),
-            _ => {
-                let (pos, bb, ty) = build_lval(func, bb, lval, symtab);
-                if matches!(ty.kind(), TypeKind::Array(_, _)) {
-                    let zero = new_value!(func).integer(0);
-                    let pos = new_value!(func).get_elem_ptr(pos, zero);
-                    add_value(func, bb, pos);
-                    (pos, bb)
-                } else {
-                    let load = new_value!(func).load(pos);
-                    add_value(func, bb, load);
-                    (load, bb)
-                }
             }
         },
     }
