@@ -55,12 +55,13 @@ BuiltinType: BuiltinType = {
 }
 
 // FuncFParams ::= FuncFParam {"," FuncFParam}
-FuncFParams: FuncFParams = <params: Comma<FuncFParam>> => FuncFParams{ <> };
+FuncFParams: Box<FuncFParams> = <params: Comma<FuncFParam>> => Box::new(FuncFParams{ <> });
 
 // FuncFParam  ::= BuiltinType IDENT ["[" "]" {"[" ConstExp "]"}];
-FuncFParam: FuncFParam = {
-    <btype: BuiltinType> <ident: Ident> => FuncFParam { btype, ident, shape: None },
-    <btype: BuiltinType> <ident: Ident> "[" "]" <shape: ("[" <ConstExp> "]")*> => FuncFParam{ btype, ident, shape: Some(shape) },
+FuncFParam: Box<FuncFParam> = {
+    <btype: BuiltinType> <ident: Ident> => Box::new(FuncFParam { btype, ident, shape: None }),
+    <btype: BuiltinType> <ident: Ident> "[" "]" <shape: ("[" <ConstExp> "]")*> =>
+        Box::new(FuncFParam{ btype, ident, shape: Some(shape) }),
 }
 
 // Block ::= "{" {BlockItem} "}";

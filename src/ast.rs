@@ -56,14 +56,14 @@ pub struct GlobalVarDef {
 pub struct FuncDef {
     pub func_type: BuiltinType,
     pub ident: String,
-    pub params: Option<FuncFParams>,
+    pub params: Option<Box<FuncFParams>>,
     pub block: Block,
 }
 
 /// [`FuncFParams`] ::= [`FuncFParam`] {`","` [`FuncFParam`]}
 #[derive(Debug)]
 pub struct FuncFParams {
-    pub params: Vec<FuncFParam>,
+    pub params: Vec<Box<FuncFParam>>,
 }
 
 /// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" ConstExp "]"}]
