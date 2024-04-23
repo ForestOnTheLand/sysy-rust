@@ -241,7 +241,6 @@ fn translate_instruction(
                     insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     config.table.reset(tmp);
                 } else {
-                    // let pos = config.symbol.get_stack_pointer(&store.dest());
                     let pos = prepare_value(store.dest(), insts, config);
                     insts.push(RiscvInstruction::Sw(reg, 0, pos));
                     config.table.reset(pos);
@@ -366,14 +365,14 @@ fn translate_instruction(
             let func_name = function_name(callee_data).unwrap();
             insts.push(RiscvInstruction::Call(func_name));
             if !config.func_data.dfg().value(value).ty().is_unit() {
-                save_stack(value, "a0".parse().unwrap(), insts, config);
+                save_stack(value, Register { id: 10 }, insts, config);
             }
         }
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
                     let reg = prepare_value(val, insts, config);
-                    insts.push(RiscvInstruction::Mv(Register::new(10), reg));
+                    insts.push(RiscvInstruction::Mv(Register { id: 10 }, reg));
                     config.table.reset(reg);
                 }
                 None => {}
@@ -424,7 +423,7 @@ fn prepare_value(
                     insts.push(RiscvInstruction::Li(reg, int.value()));
                     reg
                 } else {
-                    "x0".parse().unwrap()
+                    Register { id: 0 }
                 }
             }
             ValueKind::FuncArgRef(arg) => {
