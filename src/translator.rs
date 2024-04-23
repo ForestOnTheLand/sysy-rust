@@ -2,12 +2,18 @@
 //! Instead of implementing a `trait` as is described in the writeup,
 //! the core of the file is implemented in the function [`translate_program`].
 
+use crate::riscv::*;
 use crate::translate_util::*;
 use koopa::ir::{
     entities::ValueData, values::Aggregate, BasicBlock, BinaryOp, FunctionData, Program, TypeKind,
     Value, ValueKind,
 };
 use std::{cmp::max, io};
+
+pub fn output_program(program: &RiscvProgram, output: impl io::Write) {
+    let mut output = output;
+    writeln!(output, "{}", program).unwrap();
+}
 
 /// The core part of this module. Translate a KoopaIR program `program` into RISCV
 /// assembly, which is written into the `output`.
@@ -16,17 +22,19 @@ use std::{cmp::max, io};
 ///
 /// When encountering invalid KoopaIR program or unimplemented functions
 ///
-pub fn translate_program(program: &Program, output: &mut impl io::Write) {
+pub fn translate_program(program: &Program) -> RiscvProgram {
+    let mut code = RiscvProgram::new();
     // Global variables
     for &value in program.inst_layout() {
-        translate_global_value(program, value, output);
+        translate_global_value(program, value, &mut code);
     }
 
     // Functions
     for &func in program.func_layout() {
         let func_data = program.func(func);
-        translate_function(program, func_data, output);
+        translate_function(program, func_data, &mut code);
     }
+    code
 }
 
 /// Parsing global variables. For example:
@@ -38,43 +46,24 @@ pub fn translate_program(program: &Program, output: &mut impl io::Write) {
 ///   .zero 4
 /// ```
 ///
-fn translate_global_value(program: &Program, value: Value, output: &mut impl io::Write) {
+fn translate_global_value(program: &Program, value: Value, code: &mut RiscvProgram) {
     let value_data = program.borrow_value(value);
     let name = global_variable_name(&value_data).unwrap();
-    writeln!(output, "  .data").unwrap();
-    writeln!(output, "  .globl {}\n{}:", name, name).unwrap();
 
-    match value_data.kind() {
+    let init = match value_data.kind() {
         ValueKind::GlobalAlloc(alloc) => {
             let init_data = program.borrow_value(alloc.init());
             let size = init_data.ty().size();
             match init_data.kind() {
-                ValueKind::ZeroInit(_) => writeln!(output, "  .zero {}", size).unwrap(),
-                ValueKind::Integer(i) => writeln!(output, "  .word {}", i.value()).unwrap(),
-                ValueKind::Aggregate(list) => {
-                    let values = global_unpack(program, list);
-                    let mut zero_counter = 0;
-                    for value in values {
-                        if value != 0 {
-                            if zero_counter != 0 {
-                                writeln!(output, "  .zero {zero_counter}").unwrap();
-                            }
-                            writeln!(output, "  .word {value}").unwrap();
-                        } else {
-                            zero_counter += 4;
-                        }
-                    }
-                    if zero_counter != 0 {
-                        writeln!(output, "  .zero {zero_counter}").unwrap();
-                    }
-                }
+                ValueKind::ZeroInit(_) => vec![0; size / 4],
+                ValueKind::Integer(i) => vec![i.value()],
+                ValueKind::Aggregate(list) => global_unpack(program, list),
                 _ => unreachable!(),
             }
         }
         _ => panic!("internal error: expected global alloc instruction"),
-    }
-
-    writeln!(output, "").unwrap();
+    };
+    code.values.push(RiscvValue { name, init });
 }
 
 /// Parsing function definitions, with declarations ignored.
@@ -87,16 +76,20 @@ fn translate_global_value(program: &Program, value: Value, output: &mut impl io:
 ///   ret
 /// ```
 ///
-fn translate_function(program: &Program, func_data: &FunctionData, output: &mut impl io::Write) {
+fn translate_function(program: &Program, func_data: &FunctionData, code: &mut RiscvProgram) {
     // Ignore function declarations
     if func_data.layout().entry_bb() == None {
         return;
     }
 
-    writeln!(output, "  .text").unwrap();
     let func_name = function_name(func_data).unwrap();
-    writeln!(output, "  .globl {}\n{}:", func_name, func_name).unwrap();
-    let (stack_size, save_ra, init_pos) = allocate_stack(func_data, output);
+    let (stack_size, save_ra, init_pos) = allocate_stack(func_data);
+
+    let mut function = RiscvFunction {
+        stack_size,
+        save_ra,
+        blocks: Vec::new(),
+    };
 
     let mut config = TranslateConfig {
         program,
@@ -109,15 +102,21 @@ fn translate_function(program: &Program, func_data: &FunctionData, output: &mut 
     };
 
     for (&bb, node) in func_data.layout().bbs() {
-        let name = block_name(func_data, bb).unwrap();
-        if !name.starts_with("entry") {
-            writeln!(output, "{name}:").unwrap();
+        let mut name = block_name(func_data, bb).unwrap();
+        if name.starts_with("entry") {
+            name = func_name.clone();
         }
+        let mut block = RiscvBlock {
+            name,
+            instructions: Vec::new(),
+        };
         for &inst in node.insts().keys() {
-            translate_instruction(inst, output, &mut config);
-            writeln!(output, "").unwrap();
+            translate_instruction(inst, &mut block.instructions, &mut config);
         }
+        function.blocks.push(block);
     }
+
+    code.functions.push(function);
 }
 
 /// Getting the stack size needed for a given function.
@@ -128,7 +127,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, output: &mut 
 /// - space for local variable
 /// - space for saving RISCV register `ra` (short for "return address")
 /// - space for function arguments
-fn allocate_stack(func_data: &FunctionData, output: &mut impl io::Write) -> (usize, bool, i32) {
+fn allocate_stack(func_data: &FunctionData) -> (usize, bool, i32) {
     let mut local = 0;
     let mut ra = 0;
     let mut args = 0;
@@ -155,23 +154,6 @@ fn allocate_stack(func_data: &FunctionData, output: &mut impl io::Write) -> (usi
     }
     let total = local + ra + args * 4;
     let stack_size = (total + 15) & !0xf;
-    if stack_size != 0 {
-        if stack_size < 2048 {
-            writeln!(output, "  addi sp, sp, -{}", stack_size).unwrap();
-        } else {
-            writeln!(output, "  li t0, {stack_size}").unwrap();
-            writeln!(output, "  sub sp, sp, t0").unwrap();
-        }
-    }
-    if ra != 0 {
-        if stack_size - 4 < 2048 {
-            writeln!(output, "  sw ra, {}(sp)", stack_size - 4).unwrap();
-        } else {
-            writeln!(output, "  li t0, {}", stack_size - 4).unwrap();
-            writeln!(output, "  add t0, t0, sp").unwrap();
-            writeln!(output, "  sw ra, 0(t0)").unwrap();
-        }
-    }
     (stack_size, ra != 0, (args * 4) as i32)
 }
 
@@ -186,7 +168,11 @@ struct TranslateConfig<'a> {
 }
 
 /// Translate a single KoopaIR instruction into several RISCV instructions.
-fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut TranslateConfig) {
+fn translate_instruction(
+    value: Value,
+    insts: &mut Vec<RiscvInstruction>,
+    config: &mut TranslateConfig,
+) {
     match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(_) => unreachable!(),
         ValueKind::ZeroInit(_) => unreachable!(),
@@ -199,7 +185,10 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 TypeKind::Pointer(value) => value.size(),
                 _ => unreachable!(),
             };
-            writeln!(output, "  # at {}(sp), size {}", *config.stack_pos, size).unwrap();
+            insts.push(RiscvInstruction::Comment(format!(
+                "alloc at {}(sp), size {}",
+                *config.stack_pos, size
+            )));
             config.symbol.store_stack_pointer(value, *config.stack_pos);
             *config.stack_pos += size as i32;
         }
@@ -209,16 +198,16 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 let reg = config.table.get_vaccant();
                 let value_data = config.program.borrow_value(load.src());
                 let name = global_variable_name(&value_data).unwrap();
-                writeln!(output, "  la {reg}, {name}").unwrap();
-                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
+                insts.push(RiscvInstruction::La(reg, name));
+                insts.push(RiscvInstruction::Lw(reg, 0, reg));
                 reg
             } else {
-                let src = prepare_value(load.src(), output, config);
-                writeln!(output, "  lw {src}, 0({src})").unwrap();
-                src
+                let reg = prepare_value(load.src(), insts, config);
+                insts.push(RiscvInstruction::Lw(reg, 0, reg));
+                reg
             };
 
-            save_stack(value, reg, output, config);
+            save_stack(value, reg, insts, config);
         }
         ValueKind::Store(store) => match config.func_data.dfg().value(store.value()).kind() {
             ValueKind::Aggregate(list) => {
@@ -227,32 +216,32 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 let pos = config.symbol.get_stack_pointer(&store.dest());
                 let tmp = config.table.get_vaccant();
                 for (index, value) in values.into_iter().enumerate() {
-                    let reg = prepare_value(value, output, config);
+                    let reg = prepare_value(value, insts, config);
                     let offset = pos + (index as i32) * 4;
                     if offset < 2048 {
-                        writeln!(output, "  sw {reg}, {offset}(sp)").unwrap();
+                        insts.push(RiscvInstruction::Sw(reg, offset, "sp".parse().unwrap()));
                     } else {
-                        writeln!(output, "  li {tmp}, {offset}").unwrap();
-                        writeln!(output, "  add {tmp}, {tmp}, sp").unwrap();
-                        writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
+                        insts.push(RiscvInstruction::Li(tmp, offset));
+                        insts.push(RiscvInstruction::Add(tmp, tmp, "sp".parse().unwrap()));
+                        insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     }
                     config.table.reset(reg);
                 }
                 config.table.reset(tmp);
             }
             _ => {
-                let reg = prepare_value(store.value(), output, config);
+                let reg = prepare_value(store.value(), insts, config);
                 if store.dest().is_global() {
                     let value_data = config.program.borrow_value(store.dest());
                     let name = global_variable_name(&value_data).unwrap();
                     let tmp = config.table.get_vaccant();
-                    writeln!(output, "  la {tmp}, {name}").unwrap();
-                    writeln!(output, "  sw {reg}, 0({tmp})").unwrap();
+                    insts.push(RiscvInstruction::La(tmp, name));
+                    insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     config.table.reset(tmp);
                 } else {
                     // let pos = config.symbol.get_stack_pointer(&store.dest());
-                    let pos = prepare_value(store.dest(), output, config);
-                    writeln!(output, "  sw {reg}, 0({pos})").unwrap();
+                    let pos = prepare_value(store.dest(), insts, config);
+                    insts.push(RiscvInstruction::Sw(reg, 0, pos));
                     config.table.reset(pos);
                 }
                 config.table.reset(reg);
@@ -260,26 +249,26 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
         },
         ValueKind::GetPtr(get) => {
             assert!(!get.src().is_global());
-            let reg = prepare_value(get.src(), output, config);
+            let reg = prepare_value(get.src(), insts, config);
             let s = match config.func_data.dfg().value(get.src()).ty().kind() {
                 TypeKind::Pointer(ty) => ty.size(),
                 _ => unreachable!(),
             };
             let stride = config.table.get_vaccant();
-            writeln!(output, "  li {stride}, {s}").unwrap();
-            let index = prepare_value(get.index(), output, config);
-            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
-            writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
+            insts.push(RiscvInstruction::Li(stride, s as i32));
+            let index = prepare_value(get.index(), insts, config);
+            insts.push(RiscvInstruction::Mul(index, index, stride));
+            insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(stride);
             config.table.reset(index);
-            save_stack(value, reg, output, config);
+            save_stack(value, reg, insts, config);
         }
         ValueKind::GetElemPtr(get) => {
             let (reg, s) = if get.src().is_global() {
                 let tmp = config.table.get_vaccant();
                 let value_data = config.program.borrow_value(get.src());
                 let name = global_variable_name(&value_data).unwrap();
-                writeln!(output, "  la {tmp}, {name}").unwrap();
+                insts.push(RiscvInstruction::La(tmp, name));
                 let s = match config.program.borrow_value(get.src()).ty().kind() {
                     TypeKind::Pointer(array) => match array.kind() {
                         TypeKind::Array(elem, _) => elem.size(),
@@ -289,7 +278,7 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 };
                 (tmp, s)
             } else {
-                let pos = prepare_value(get.src(), output, config);
+                let pos = prepare_value(get.src(), insts, config);
                 let s = match config.func_data.dfg().value(get.src()).ty().kind() {
                     TypeKind::Pointer(array) => match array.kind() {
                         TypeKind::Array(elem, _) => elem.size(),
@@ -300,116 +289,108 @@ fn translate_instruction(value: Value, output: &mut impl io::Write, config: &mut
                 (pos, s)
             };
             let stride = config.table.get_vaccant();
-            writeln!(output, "  li {stride}, {s}").unwrap();
-            let index = prepare_value(get.index(), output, config);
-            writeln!(output, "  mul {index}, {index}, {stride}").unwrap();
-            writeln!(output, "  add {reg}, {reg}, {index}").unwrap();
+            insts.push(RiscvInstruction::Li(stride, s as i32));
+            let index = prepare_value(get.index(), insts, config);
+            insts.push(RiscvInstruction::Mul(index, index, stride));
+            insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(stride);
             config.table.reset(index);
-            save_stack(value, reg, output, config);
+            save_stack(value, reg, insts, config);
         }
 
         ValueKind::Binary(bin) => {
-            let left = prepare_value(bin.lhs(), output, config);
-            let right = prepare_value(bin.rhs(), output, config);
+            let left = prepare_value(bin.lhs(), insts, config);
+            let right = prepare_value(bin.rhs(), insts, config);
             config.table.reset(left);
             config.table.reset(right);
             let res = config.table.get_vaccant();
 
             match bin.op() {
-                BinaryOp::Add => writeln!(output, "  add {res}, {left}, {right}"),
-                BinaryOp::Sub => writeln!(output, "  sub {res}, {left}, {right}"),
-                BinaryOp::Mul => writeln!(output, "  mul {res}, {left}, {right}"),
-                BinaryOp::Div => writeln!(output, "  div {res}, {left}, {right}"),
-                BinaryOp::Mod => writeln!(output, "  rem {res}, {left}, {right}"),
-                BinaryOp::And => writeln!(output, "  and {res}, {left}, {right}"),
-                BinaryOp::Or => writeln!(output, "  or {res}, {left}, {right}"),
-                BinaryOp::Lt => writeln!(output, "  slt {res}, {left}, {right}"),
+                BinaryOp::Add => insts.push(RiscvInstruction::Add(res, left, right)),
+                BinaryOp::Sub => insts.push(RiscvInstruction::Sub(res, left, right)),
+                BinaryOp::Mul => insts.push(RiscvInstruction::Mul(res, left, right)),
+                BinaryOp::Div => insts.push(RiscvInstruction::Div(res, left, right)),
+                BinaryOp::Mod => insts.push(RiscvInstruction::Rem(res, left, right)),
+                BinaryOp::And => insts.push(RiscvInstruction::And(res, left, right)),
+                BinaryOp::Or => insts.push(RiscvInstruction::Or(res, left, right)),
+                BinaryOp::Lt => insts.push(RiscvInstruction::Slt(res, left, right)),
                 BinaryOp::Le => {
-                    writeln!(output, "  sgt {res}, {left}, {right}\n  seqz {res}, {left}")
+                    insts.push(RiscvInstruction::Sgt(res, left, right));
+                    insts.push(RiscvInstruction::Seqz(res, res));
                 }
-                BinaryOp::Gt => writeln!(output, "  sgt {res}, {left}, {right}"),
+                BinaryOp::Gt => insts.push(RiscvInstruction::Sgt(res, left, right)),
                 BinaryOp::Ge => {
-                    writeln!(output, "  slt {res}, {left}, {right}\n  seqz {res}, {left}")
+                    insts.push(RiscvInstruction::Slt(res, left, right));
+                    insts.push(RiscvInstruction::Seqz(res, res));
                 }
                 BinaryOp::Eq => {
-                    writeln!(output, "  xor {res}, {left}, {right}\n  seqz {res}, {left}")
+                    insts.push(RiscvInstruction::Xor(res, left, right));
+                    insts.push(RiscvInstruction::Seqz(res, res));
                 }
                 BinaryOp::NotEq => {
-                    writeln!(output, "  xor {res}, {left}, {right}\n  snez {res}, {left}")
+                    insts.push(RiscvInstruction::Xor(res, left, right));
+                    insts.push(RiscvInstruction::Snez(res, res));
                 }
                 _ => unimplemented!(),
-            }
-            .unwrap();
+            };
 
-            save_stack(value, res, output, config);
+            save_stack(value, res, insts, config);
         }
         ValueKind::Branch(branch) => {
-            let cond = prepare_value(branch.cond(), output, config);
+            let cond = prepare_value(branch.cond(), insts, config);
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
-            writeln!(output, "  bnez {cond}, {then_tag}").unwrap();
+
+            insts.push(RiscvInstruction::Bnez(cond, then_tag));
             config.table.reset(cond);
-            writeln!(output, "  j {else_tag}").unwrap();
+            insts.push(RiscvInstruction::Jump(else_tag));
         }
         ValueKind::Jump(jump) => {
             let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
-            writeln!(output, "  j {jmp_tag}").unwrap();
+            insts.push(RiscvInstruction::Jump(jmp_tag));
         }
         ValueKind::Call(call) => {
             for (i, &arg) in call.args().iter().enumerate() {
-                let reg = prepare_value(arg, output, config);
+                let reg = prepare_value(arg, insts, config);
                 if i < 8 {
-                    writeln!(output, "  mv a{i}, {reg}").unwrap();
+                    insts.push(RiscvInstruction::Mv(Register::new((10 + i) as u8), reg));
                 } else {
-                    writeln!(output, "  sw {reg}, {}(sp)", (i - 8) * 4).unwrap();
+                    insts.push(RiscvInstruction::Sw(
+                        reg,
+                        ((i - 8) * 4) as i32,
+                        "sp".parse().unwrap(),
+                    ));
                 }
                 config.table.reset(reg);
             }
             let callee = call.callee();
             let callee_data = config.program.func(callee);
             let func_name = function_name(callee_data).unwrap();
-            writeln!(output, "  call {func_name}").unwrap();
+            insts.push(RiscvInstruction::Call(func_name));
             if !config.func_data.dfg().value(value).ty().is_unit() {
-                save_stack(value, "a0".parse().unwrap(), output, config);
+                save_stack(value, "a0".parse().unwrap(), insts, config);
             }
         }
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
-                    let reg = prepare_value(val, output, config);
-                    writeln!(output, "  mv a0, {}", reg).unwrap();
+                    let reg = prepare_value(val, insts, config);
+                    insts.push(RiscvInstruction::Mv(Register::new(10), reg));
                     config.table.reset(reg);
                 }
                 None => {}
             };
-            let stack_size = config.stack_size;
-
-            if config.save_ra {
-                if stack_size - 4 < 2048 {
-                    writeln!(output, "  lw ra, {}(sp)", stack_size - 4).unwrap();
-                } else {
-                    writeln!(output, "  li t0, {}", stack_size - 4).unwrap();
-                    writeln!(output, "  add t0, t0, sp").unwrap();
-                    writeln!(output, "  lw ra, 0(t0)").unwrap();
-                }
-            }
-            if stack_size > 0 {
-                if stack_size < 2048 {
-                    writeln!(output, "  addi sp, sp, {}", stack_size).unwrap();
-                } else {
-                    writeln!(output, "  li t0, {}", stack_size).unwrap();
-                    writeln!(output, "  add sp, sp, t0").unwrap();
-                }
-            }
-            writeln!(output, "  ret").unwrap();
+            insts.push(RiscvInstruction::Ret {
+                stack_size: config.stack_size,
+                save_ra: config.save_ra,
+            });
         }
     }
 }
 
 fn prepare_value(
     value: Value,
-    output: &mut impl io::Write,
+    insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
 ) -> Register {
     match config.symbol.get(&value) {
@@ -419,11 +400,11 @@ fn prepare_value(
             let pos = *pos;
             let reg = config.table.get_vaccant();
             if pos < 2048 {
-                writeln!(output, "  lw {reg}, {pos}(sp)").unwrap();
+                insts.push(RiscvInstruction::Lw(reg, pos, "sp".parse().unwrap()));
             } else {
-                writeln!(output, "  li {reg}, {pos}").unwrap();
-                writeln!(output, "  add {reg}, sp, {reg}").unwrap();
-                writeln!(output, "  lw {reg}, 0({reg})").unwrap();
+                insts.push(RiscvInstruction::Li(reg, pos));
+                insts.push(RiscvInstruction::Add(reg, "sp".parse().unwrap(), reg));
+                insts.push(RiscvInstruction::Lw(reg, 0, reg));
             }
             reg
         }
@@ -431,10 +412,10 @@ fn prepare_value(
             let pos = *pos;
             let reg = config.table.get_vaccant();
             if pos < 2048 {
-                writeln!(output, "  addi {reg}, sp, {pos}").unwrap();
+                insts.push(RiscvInstruction::Addi(reg, "sp".parse().unwrap(), pos));
             } else {
-                writeln!(output, "  li {reg}, {pos}").unwrap();
-                writeln!(output, "  add {reg}, sp, {reg}").unwrap();
+                insts.push(RiscvInstruction::Li(reg, pos));
+                insts.push(RiscvInstruction::Add(reg, "sp".parse().unwrap(), reg));
             }
             reg
         }
@@ -442,7 +423,7 @@ fn prepare_value(
             ValueKind::Integer(int) => {
                 if int.value() != 0 {
                     let reg = config.table.get_vaccant();
-                    writeln!(output, "  li {}, {}", reg, int.value()).unwrap();
+                    insts.push(RiscvInstruction::Li(reg, int.value()));
                     reg
                 } else {
                     "x0".parse().unwrap()
@@ -454,7 +435,11 @@ fn prepare_value(
                 } else {
                     let reg = config.table.get_vaccant();
                     let offset = config.stack_size + (arg.index() - 8) * 4;
-                    writeln!(output, "  lw {reg}, {offset}(sp)").unwrap();
+                    insts.push(RiscvInstruction::Lw(
+                        reg,
+                        offset as i32,
+                        "sp".parse().unwrap(),
+                    ));
                     reg
                 }
             }
@@ -466,18 +451,19 @@ fn prepare_value(
 fn save_stack(
     value: Value,
     reg: Register,
-    output: &mut impl io::Write,
+    insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
 ) {
+    let sp = "sp".parse().unwrap();
     config.symbol.store_stack(value, *config.stack_pos);
     let pos = *config.stack_pos;
     if pos < 2048 {
-        writeln!(output, "  sw {reg}, {pos}(sp)").unwrap();
+        insts.push(RiscvInstruction::Sw(reg, pos, sp));
     } else {
         let temp = config.table.get_vaccant();
-        writeln!(output, "  li {temp}, {pos}").unwrap();
-        writeln!(output, "  add {temp}, sp, {temp}").unwrap();
-        writeln!(output, "  sw {reg}, 0({temp})").unwrap();
+        insts.push(RiscvInstruction::Li(temp, pos));
+        insts.push(RiscvInstruction::Add(temp, sp, temp));
+        insts.push(RiscvInstruction::Sw(reg, 0, temp));
         config.table.reset(temp);
     }
     config.table.reset(reg);

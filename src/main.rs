@@ -7,6 +7,8 @@ mod ast;
 mod build_util;
 /// Build KoopaIR from AST
 mod builder;
+/// RISCV
+mod riscv;
 /// RISCV Register
 mod translate_util;
 /// Translate KoopaIR into RISCV
@@ -21,7 +23,7 @@ lalrpop_mod!(sysy);
 /// Usage: `<program> <mode> <input> -o <output_file>`
 fn main() {
     koopa::ir::Type::set_ptr_size(4);
-    let (mode, input, mut output) = util::parse_args();
+    let (mode, input, output) = util::parse_args();
 
     let ast = sysy::CompUnitParser::new().parse(&input).unwrap();
     let program = builder::build_program(&ast);
@@ -31,7 +33,8 @@ fn main() {
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {
-            translator::translate_program(&program, &mut output);
+            let code = translator::translate_program(&program);
+            translator::output_program(&code, output);
         }
     }
 }
