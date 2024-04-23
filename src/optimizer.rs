@@ -5,11 +5,19 @@ impl RiscvProgram {
         for func in self.functions.iter_mut() {
             func.fold_addi();
             func.eliminate_load();
+            func.eliminate_jump();
         }
     }
 }
 
 impl RiscvFunction {
+    /// Combine addi with other instructions, such as
+    /// ```riscv
+    ///   addi t1, 100, sp
+    ///   sw t1, 0(t1)
+    /// # Equivalent to
+    ///   sw t1, 100(sp)
+    /// ```
     fn fold_addi(&mut self) {
         use RiscvInstruction::{Addi, Lw, Nop, Sw};
         for block in self.blocks.iter_mut() {
@@ -42,6 +50,11 @@ impl RiscvFunction {
         }
     }
 
+    /// Eliminate useless load, such as
+    /// ```riscv
+    ///   sw t1, 16(sp)
+    ///   lw t1, 16(sp) # useless
+    /// ```
     fn eliminate_load(&mut self) {
         use RiscvInstruction::{Lw, Nop, Sw};
         for block in self.blocks.iter_mut() {
@@ -64,9 +77,27 @@ impl RiscvFunction {
             }
         }
     }
+
+    /// Eliminate useless jump, such as
+    /// ```riscv
+    ///   j label # useless
+    /// label:
+    /// ```
+    fn eliminate_jump(&mut self) {
+        use RiscvInstruction::Jump;
+        let num = self.blocks.len();
+        for i in 0..(num - 1) {
+            if let Some(Jump(label)) = self.blocks[i].instructions.last() {
+                if &self.blocks[i + 1].name == label {
+                    self.blocks[i].instructions.pop();
+                }
+            }
+        }
+    }
 }
 
 impl RiscvBlock {
+    /// Clear Nops in a block.
     fn clear_nop(&mut self) {
         self.instructions
             .retain(|x| !matches!(x, RiscvInstruction::Nop));
