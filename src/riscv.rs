@@ -30,6 +30,7 @@ pub struct RiscvBlock {
 pub enum RiscvInstruction {
     // Comment
     Comment(String),
+    Nop,
     // Control flow
     Beqz(Register, String),
     Bnez(Register, String),
@@ -147,6 +148,7 @@ impl std::fmt::Display for RiscvInstruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RiscvInstruction::Comment(s) => writeln!(f, "  # {s}"),
+            RiscvInstruction::Nop => Ok(()),
             RiscvInstruction::Beqz(d, s) => writeln!(f, "  beqz {d}, {s}"),
             RiscvInstruction::Bnez(d, s) => writeln!(f, "  bnez {d}, {s}"),
             RiscvInstruction::Jump(label) => writeln!(f, "  j {label}"),

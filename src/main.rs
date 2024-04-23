@@ -7,6 +7,8 @@ mod ast;
 mod build_util;
 /// Build KoopaIR from AST
 mod builder;
+/// Optimizer
+mod optimizer;
 /// RISCV
 mod riscv;
 /// RISCV Register
@@ -33,7 +35,8 @@ fn main() {
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {
-            let code = translator::translate_program(&program);
+            let mut code = translator::translate_program(&program);
+            code.optimize();
             translator::output_program(&code, output);
         }
     }

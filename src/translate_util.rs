@@ -41,6 +41,14 @@ impl fmt::Display for Register {
     }
 }
 
+impl PartialEq for Register {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Register {}
+
 impl str::FromStr for Register {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
