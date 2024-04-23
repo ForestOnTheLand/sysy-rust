@@ -6,6 +6,7 @@ use std::{env, fs};
 pub enum Mode {
     Koopa,
     RiscV,
+    Perf,
 }
 
 pub fn print_usage() -> ! {
@@ -17,7 +18,8 @@ pub fn parse_args() -> (Mode, String, fs::File) {
     let args: Vec<String> = env::args().collect();
     let mode = match &args[1] as &str {
         "-koopa" => Mode::Koopa,
-        "-riscv" | "-perf" => Mode::RiscV,
+        "-riscv" => Mode::RiscV,
+        "-perf" => Mode::Perf,
         _ => print_usage(),
     };
     let input = fs::read_to_string(args[2].clone()).unwrap();

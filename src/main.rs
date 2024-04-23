@@ -35,6 +35,10 @@ fn main() {
             builder::output_program(&program, output);
         }
         util::Mode::RiscV => {
+            let code = translator::translate_program(&program);
+            translator::output_program(&code, output);
+        }
+        util::Mode::Perf => {
             let mut code = translator::translate_program(&program);
             code.optimize();
             translator::output_program(&code, output);

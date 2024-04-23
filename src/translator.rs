@@ -37,6 +37,8 @@ pub fn translate_program(program: &Program) -> RiscvProgram {
     code
 }
 
+static SP: Register = Register { id: 2 };
+
 /// Parsing global variables. For example:
 ///
 /// ```riscv
@@ -219,10 +221,10 @@ fn translate_instruction(
                     let reg = prepare_value(value, insts, config);
                     let offset = pos + (index as i32) * 4;
                     if offset < 2048 {
-                        insts.push(RiscvInstruction::Sw(reg, offset, "sp".parse().unwrap()));
+                        insts.push(RiscvInstruction::Sw(reg, offset, SP));
                     } else {
                         insts.push(RiscvInstruction::Li(tmp, offset));
-                        insts.push(RiscvInstruction::Add(tmp, tmp, "sp".parse().unwrap()));
+                        insts.push(RiscvInstruction::Add(tmp, tmp, SP));
                         insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     }
                     config.table.reset(reg);
@@ -355,11 +357,7 @@ fn translate_instruction(
                 if i < 8 {
                     insts.push(RiscvInstruction::Mv(Register::new((10 + i) as u8), reg));
                 } else {
-                    insts.push(RiscvInstruction::Sw(
-                        reg,
-                        ((i - 8) * 4) as i32,
-                        "sp".parse().unwrap(),
-                    ));
+                    insts.push(RiscvInstruction::Sw(reg, ((i - 8) * 4) as i32, SP));
                 }
                 config.table.reset(reg);
             }
@@ -400,10 +398,10 @@ fn prepare_value(
             let pos = *pos;
             let reg = config.table.get_vaccant();
             if pos < 2048 {
-                insts.push(RiscvInstruction::Lw(reg, pos, "sp".parse().unwrap()));
+                insts.push(RiscvInstruction::Lw(reg, pos, SP));
             } else {
                 insts.push(RiscvInstruction::Li(reg, pos));
-                insts.push(RiscvInstruction::Add(reg, "sp".parse().unwrap(), reg));
+                insts.push(RiscvInstruction::Add(reg, SP, reg));
                 insts.push(RiscvInstruction::Lw(reg, 0, reg));
             }
             reg
@@ -412,10 +410,10 @@ fn prepare_value(
             let pos = *pos;
             let reg = config.table.get_vaccant();
             if pos < 2048 {
-                insts.push(RiscvInstruction::Addi(reg, "sp".parse().unwrap(), pos));
+                insts.push(RiscvInstruction::Addi(reg, SP, pos));
             } else {
                 insts.push(RiscvInstruction::Li(reg, pos));
-                insts.push(RiscvInstruction::Add(reg, "sp".parse().unwrap(), reg));
+                insts.push(RiscvInstruction::Add(reg, SP, reg));
             }
             reg
         }
@@ -435,11 +433,7 @@ fn prepare_value(
                 } else {
                     let reg = config.table.get_vaccant();
                     let offset = config.stack_size + (arg.index() - 8) * 4;
-                    insts.push(RiscvInstruction::Lw(
-                        reg,
-                        offset as i32,
-                        "sp".parse().unwrap(),
-                    ));
+                    insts.push(RiscvInstruction::Lw(reg, offset as i32, SP));
                     reg
                 }
             }
@@ -454,7 +448,7 @@ fn save_stack(
     insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
 ) {
-    let sp = "sp".parse().unwrap();
+    let sp = SP;
     config.symbol.store_stack(value, *config.stack_pos);
     let pos = *config.stack_pos;
     if pos < 2048 {
