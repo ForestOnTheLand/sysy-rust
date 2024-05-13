@@ -58,6 +58,7 @@ pub enum RiscvInstruction {
     Srl(Register, Register, Register),
     Sra(Register, Register, Register),
     Mul(Register, Register, Register),
+    Muli(Register, Register, i32),
     Div(Register, Register, Register),
     Rem(Register, Register, Register),
     // Load & Move
@@ -213,11 +214,23 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Srl(d, a, b) => writeln!(f, "  srl {d}, {a}, {b}"),
             RiscvInstruction::Sra(d, a, b) => writeln!(f, "  sra {d}, {a}, {b}"),
             RiscvInstruction::Mul(d, a, b) => writeln!(f, "  mul {d}, {a}, {b}"),
+            RiscvInstruction::Muli(d, a, i) => match int_log2(*i) {
+                Some(u) => writeln!(f, "  slli {d}, {a}, {u}"),
+                None => writeln!(f, "  li t0, {i}\n  mul {d}, {a}, t0"),
+            },
             RiscvInstruction::Div(d, a, b) => writeln!(f, "  div {d}, {a}, {b}"),
             RiscvInstruction::Rem(d, a, b) => writeln!(f, "  rem {d}, {a}, {b}"),
             RiscvInstruction::Li(d, s) => writeln!(f, "  li {d}, {s}"),
             RiscvInstruction::La(d, s) => writeln!(f, "  la {d}, {s}"),
             RiscvInstruction::Mv(d, s) => writeln!(f, "  mv {d}, {s}"),
         }
+    }
+}
+
+fn int_log2(i: i32) -> Option<u32> {
+    if i & (i - 1) == 0 {
+        i.checked_ilog2()
+    } else {
+        None
     }
 }

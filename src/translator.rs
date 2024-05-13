@@ -245,12 +245,9 @@ fn translate_instruction(
                 TypeKind::Pointer(ty) => ty.size(),
                 _ => unreachable!(),
             };
-            let stride = config.table.get_vaccant();
-            insts.push(RiscvInstruction::Li(stride, s as i32));
             let index = prepare_value(get.index(), insts, config);
-            insts.push(RiscvInstruction::Mul(index, index, stride));
+            insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
-            config.table.reset(stride);
             config.table.reset(index);
             save_stack(value, reg, insts, config);
         }
@@ -279,12 +276,9 @@ fn translate_instruction(
                 };
                 (pos, s)
             };
-            let stride = config.table.get_vaccant();
-            insts.push(RiscvInstruction::Li(stride, s as i32));
             let index = prepare_value(get.index(), insts, config);
-            insts.push(RiscvInstruction::Mul(index, index, stride));
+            insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
-            config.table.reset(stride);
             config.table.reset(index);
             save_stack(value, reg, insts, config);
         }
