@@ -214,20 +214,12 @@ fn translate_instruction(
                 assert!(!store.dest().is_global());
                 let values = local_unpack(config.func_data, list);
                 let pos = config.symbol.get_stack_pointer(&store.dest());
-                let tmp = config.table.get_vaccant();
                 for (index, value) in values.into_iter().enumerate() {
                     let reg = prepare_value(value, insts, config);
                     let offset = pos + (index as i32) * 4;
-                    if offset < 2048 {
-                        insts.push(RiscvInstruction::Sw(reg, offset, Register::SP));
-                    } else {
-                        insts.push(RiscvInstruction::Li(tmp, offset));
-                        insts.push(RiscvInstruction::Add(tmp, tmp, Register::SP));
-                        insts.push(RiscvInstruction::Sw(reg, 0, tmp));
-                    }
+                    insts.push(RiscvInstruction::Sw(reg, offset, Register::SP));
                     config.table.reset(reg);
                 }
-                config.table.reset(tmp);
             }
             _ => {
                 let reg = prepare_value(store.value(), insts, config);
@@ -340,9 +332,9 @@ fn translate_instruction(
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
 
-            insts.push(RiscvInstruction::Beqz(cond, else_tag));
+            insts.push(RiscvInstruction::Bnez(cond, then_tag));
             config.table.reset(cond);
-            insts.push(RiscvInstruction::Jump(then_tag));
+            insts.push(RiscvInstruction::Jump(else_tag));
         }
         ValueKind::Jump(jump) => {
             let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
@@ -394,28 +386,16 @@ fn prepare_value(
 ) -> Register {
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
-        Some(AllocPos::RegPointer(_)) => panic!("Register is not addressable"),
         Some(AllocPos::Stack(pos)) => {
             let pos = *pos;
             let reg = config.table.get_vaccant();
-            if pos < 2048 {
-                insts.push(RiscvInstruction::Lw(reg, pos, Register::SP));
-            } else {
-                insts.push(RiscvInstruction::Li(reg, pos));
-                insts.push(RiscvInstruction::Add(reg, Register::SP, reg));
-                insts.push(RiscvInstruction::Lw(reg, 0, reg));
-            }
+            insts.push(RiscvInstruction::Lw(reg, pos, Register::SP));
             reg
         }
         Some(AllocPos::StackPointer(pos)) => {
             let pos = *pos;
             let reg = config.table.get_vaccant();
-            if pos < 2048 {
-                insts.push(RiscvInstruction::Addi(reg, Register::SP, pos));
-            } else {
-                insts.push(RiscvInstruction::Li(reg, pos));
-                insts.push(RiscvInstruction::Add(reg, Register::SP, reg));
-            }
+            insts.push(RiscvInstruction::Addi(reg, Register::SP, pos));
             reg
         }
         None => match config.func_data.dfg().value(value).kind() {
@@ -451,15 +431,7 @@ fn save_stack(
 ) {
     config.symbol.store_stack(value, *config.stack_pos);
     let pos = *config.stack_pos;
-    if pos < 2048 {
-        insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
-    } else {
-        let temp = config.table.get_vaccant();
-        insts.push(RiscvInstruction::Li(temp, pos));
-        insts.push(RiscvInstruction::Add(temp, Register::SP, temp));
-        insts.push(RiscvInstruction::Sw(reg, 0, temp));
-        config.table.reset(temp);
-    }
+    insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
     config.table.reset(reg);
     *config.stack_pos += 4;
 }

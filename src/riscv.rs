@@ -176,10 +176,28 @@ impl std::fmt::Display for RiscvInstruction {
                 }
                 writeln!(f, "  ret")
             }
-            RiscvInstruction::Lw(d, a, b) => writeln!(f, "  lw {d}, {a}({b})"),
-            RiscvInstruction::Sw(d, a, b) => writeln!(f, "  sw {d}, {a}({b})"),
+            RiscvInstruction::Lw(d, i, b) => {
+                if *i < 2048 && *i >= -2048 {
+                    writeln!(f, "  lw {d}, {i}({b})")
+                } else {
+                    writeln!(f, "  li {d}, {i}\n  add {d}, {d}, {b}\n  lw {d}, ({d})")
+                }
+            }
+            RiscvInstruction::Sw(d, i, b) => {
+                if *i < 2048 && *i >= -2048 {
+                    writeln!(f, "  sw {d}, {i}({b})")
+                } else {
+                    writeln!(f, "  li t0, {i}\n  add t0, t0, sp\n  sw {d}, (t0)")
+                }
+            }
             RiscvInstruction::Add(d, a, b) => writeln!(f, "  add {d}, {a}, {b}"),
-            RiscvInstruction::Addi(d, a, b) => writeln!(f, "  addi {d}, {a}, {b}"),
+            RiscvInstruction::Addi(d, a, i) => {
+                if *i < 2048 && *i >= -2048 {
+                    writeln!(f, "  addi {d}, {a}, {i}")
+                } else {
+                    writeln!(f, "  li {d}, {i}\n  add {d}, {a}, {d}")
+                }
+            }
             RiscvInstruction::Sub(d, a, b) => writeln!(f, "  sub {d}, {a}, {b}"),
             RiscvInstruction::Slt(d, a, b) => writeln!(f, "  slt {d}, {a}, {b}"),
             RiscvInstruction::Sgt(d, a, b) => writeln!(f, "  sgt {d}, {a}, {b}"),

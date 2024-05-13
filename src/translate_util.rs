@@ -67,7 +67,7 @@ impl Register {
         "t5", "t6",
     ];
     /// temp registers that are allowed to use freely, namely t0~t6
-    const TMP_REG: [u8; 7] = [5, 6, 7, 28, 29, 30, 31];
+    const TMP_REG: [u8; 6] = [6, 7, 28, 29, 30, 31];
 }
 
 impl Register {
@@ -138,9 +138,7 @@ impl RegisterTable {
 pub enum AllocPos {
     #[allow(dead_code)]
     Reg(Register), // x = %reg
-    Stack(i32), // x = offset(%sp)
-    #[allow(dead_code)]
-    RegPointer(Register), // x = &%reg
+    Stack(i32),        // x = offset(%sp)
     StackPointer(i32), // x = %sp + offset = &offset(%sp)
 }
 
@@ -163,11 +161,6 @@ impl AllocTable {
     #[allow(dead_code)]
     pub fn store_register(&mut self, value: Value, reg: Register) {
         self.data.insert(value, AllocPos::Reg(reg));
-    }
-
-    #[allow(dead_code)]
-    pub fn store_register_pointer(&mut self, value: Value, reg: Register) {
-        self.data.insert(value, AllocPos::RegPointer(reg));
     }
 
     pub fn store_stack(&mut self, value: Value, offset: i32) {

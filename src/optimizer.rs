@@ -24,8 +24,8 @@ impl RiscvFunction {
             let num = block.instructions.len();
             let mut need_clean = false;
             for i in 0..(num - 1) {
-                if let Addi(address, base, offset) = block.instructions[i] {
-                    match block.instructions[i + 1] {
+                match block.instructions[i] {
+                    Addi(address, base, offset) => match block.instructions[i + 1] {
                         Lw(dst, 0, addr) => {
                             if addr == address {
                                 block.instructions[i] = Nop;
@@ -41,7 +41,8 @@ impl RiscvFunction {
                             }
                         }
                         _ => {}
-                    }
+                    },
+                    _ => {}
                 }
             }
             if need_clean {
