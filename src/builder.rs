@@ -320,67 +320,6 @@ fn build_var_def(
     }
 }
 
-fn build_init_value(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    val: &InitVal,
-    shape: Vec<usize>,
-    symtab: &mut SymbolTable,
-) -> (Vec<Value>, BasicBlock) {
-    let size = shape.iter().product();
-    let mut data = Vec::new();
-    data.resize(size, new_value!(func).integer(0));
-    match val {
-        InitVal::Single(exp) => {
-            let (value, next_bb) = build_exp(func, bb, exp, symtab);
-            data[0] = value;
-            (data, next_bb)
-        }
-        InitVal::Array(exps) => {
-            let mut offset = 0;
-            let mut bb = bb;
-            for exp in exps.iter() {
-                let (next_offset, next_bb) =
-                    _build_init_array_value(func, bb, exp, &shape, symtab, &mut data, offset);
-                offset = next_offset;
-                bb = next_bb;
-            }
-            (data, bb)
-        }
-    }
-}
-
-fn _build_init_array_value(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    val: &InitVal,
-    shape: &Vec<usize>,
-    symtab: &mut SymbolTable,
-    data: &mut Vec<Value>,
-    offset: usize,
-) -> (usize, BasicBlock) {
-    match val {
-        InitVal::Single(exp) => {
-            let (value, next_bb) = build_exp(func, bb, exp, symtab);
-            data[offset] = value;
-            (offset + 1, next_bb)
-        }
-        InitVal::Array(exps) => {
-            let s = get_subshape(&shape, offset);
-            let end_offset = offset + s.iter().product::<usize>();
-            let mut offset = offset;
-            let mut bb = bb;
-            for exp in exps.iter() {
-                let (next_offset, next_bb) =
-                    _build_init_array_value(func, bb, exp, &s, symtab, data, offset);
-                offset = next_offset;
-                bb = next_bb;
-            }
-            (end_offset, bb)
-        }
-    }
-}
-
 fn build_const_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -421,48 +360,6 @@ fn build_const_def(
         );
         let ty = func.dfg().value(array).ty().clone();
         symtab.insert_var(def.ident.clone(), array, ty);
-    }
-}
-
-fn compute_init_value(init: &ConstInitVal, shape: Vec<usize>, symtab: &SymbolTable) -> Vec<i32> {
-    let size = shape.iter().product();
-    let mut data = Vec::new();
-    data.resize(size, 0);
-    match init {
-        ConstInitVal::Single(exp) => {
-            data[0] = compute_const_exp(exp, symtab);
-        }
-        ConstInitVal::Array(exps) => {
-            let mut offset = 0;
-            for exp in exps.iter() {
-                offset = _compute_init_value(exp, &shape, symtab, &mut data, offset);
-            }
-        }
-    }
-    data
-}
-
-fn _compute_init_value(
-    init: &ConstInitVal,
-    shape: &Vec<usize>,
-    symtab: &SymbolTable,
-    data: &mut Vec<i32>,
-    offset: usize,
-) -> usize {
-    match init {
-        ConstInitVal::Single(exp) => {
-            data[offset] = compute_const_exp(exp, symtab);
-            offset + 1
-        }
-        ConstInitVal::Array(exps) => {
-            let s = get_subshape(&shape, offset);
-            let end_offset = offset + s.iter().product::<usize>();
-            let mut offset = offset;
-            for exp in exps.iter() {
-                offset = _compute_init_value(exp, &s, symtab, data, offset);
-            }
-            end_offset
-        }
     }
 }
 
@@ -907,6 +804,109 @@ fn local_packing(func: &mut FunctionData, data: Vec<Value>, shape: &Vec<usize>) 
         data = next_data
     }
     data[0]
+}
+
+fn compute_init_value(init: &ConstInitVal, shape: Vec<usize>, symtab: &SymbolTable) -> Vec<i32> {
+    let size = shape.iter().product();
+    let mut data = Vec::new();
+    data.resize(size, 0);
+    match init {
+        ConstInitVal::Single(exp) => {
+            data[0] = compute_const_exp(exp, symtab);
+        }
+        ConstInitVal::Array(exps) => {
+            let mut offset = 0;
+            for exp in exps.iter() {
+                offset = _compute_init_value(exp, &shape, symtab, &mut data, offset);
+            }
+        }
+    }
+    data
+}
+
+fn _compute_init_value(
+    init: &ConstInitVal,
+    shape: &Vec<usize>,
+    symtab: &SymbolTable,
+    data: &mut Vec<i32>,
+    offset: usize,
+) -> usize {
+    match init {
+        ConstInitVal::Single(exp) => {
+            data[offset] = compute_const_exp(exp, symtab);
+            offset + 1
+        }
+        ConstInitVal::Array(exps) => {
+            let s = get_subshape(&shape, offset);
+            let end_offset = offset + s.iter().product::<usize>();
+            let mut offset = offset;
+            for exp in exps.iter() {
+                offset = _compute_init_value(exp, &s, symtab, data, offset);
+            }
+            end_offset
+        }
+    }
+}
+
+fn build_init_value(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    val: &InitVal,
+    shape: Vec<usize>,
+    symtab: &mut SymbolTable,
+) -> (Vec<Value>, BasicBlock) {
+    let size = shape.iter().product();
+    let mut data = Vec::new();
+    data.resize(size, new_value!(func).integer(0));
+    match val {
+        InitVal::Single(exp) => {
+            let (value, next_bb) = build_exp(func, bb, exp, symtab);
+            data[0] = value;
+            (data, next_bb)
+        }
+        InitVal::Array(exps) => {
+            let mut offset = 0;
+            let mut bb = bb;
+            for exp in exps.iter() {
+                let (next_offset, next_bb) =
+                    _build_init_array_value(func, bb, exp, &shape, symtab, &mut data, offset);
+                offset = next_offset;
+                bb = next_bb;
+            }
+            (data, bb)
+        }
+    }
+}
+
+fn _build_init_array_value(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    val: &InitVal,
+    shape: &Vec<usize>,
+    symtab: &mut SymbolTable,
+    data: &mut Vec<Value>,
+    offset: usize,
+) -> (usize, BasicBlock) {
+    match val {
+        InitVal::Single(exp) => {
+            let (value, next_bb) = build_exp(func, bb, exp, symtab);
+            data[offset] = value;
+            (offset + 1, next_bb)
+        }
+        InitVal::Array(exps) => {
+            let s = get_subshape(&shape, offset);
+            let end_offset = offset + s.iter().product::<usize>();
+            let mut offset = offset;
+            let mut bb = bb;
+            for exp in exps.iter() {
+                let (next_offset, next_bb) =
+                    _build_init_array_value(func, bb, exp, &s, symtab, data, offset);
+                offset = next_offset;
+                bb = next_bb;
+            }
+            (end_offset, bb)
+        }
+    }
 }
 
 fn get_array_type(shape: &Vec<usize>) -> Type {
