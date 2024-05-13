@@ -3,6 +3,7 @@ use crate::riscv::{RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram};
 impl RiscvProgram {
     pub fn optimize(&mut self) {
         for func in self.functions.iter_mut() {
+            func.clear_useless();
             func.fold_addi();
             func.eliminate_load();
             func.eliminate_jump();
@@ -11,6 +12,26 @@ impl RiscvProgram {
 }
 
 impl RiscvFunction {
+    /// Clear instructions that essentially do nothing.
+    fn clear_useless(&mut self) {
+        use RiscvInstruction::{Nop, Xori};
+        for block in self.blocks.iter_mut() {
+            let num = block.instructions.len();
+            let mut need_clean = false;
+            for i in 0..num {
+                if let Xori(d, s, 0) = block.instructions[i] {
+                    if d == s {
+                        block.instructions[i] = Nop;
+                        need_clean = true;
+                    }
+                }
+            }
+            if need_clean {
+                block.clear_nop();
+            }
+        }
+    }
+
     /// Combine addi with other instructions, such as
     /// ```riscv
     ///   addi t1, 100, sp

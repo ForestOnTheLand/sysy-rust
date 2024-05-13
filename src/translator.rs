@@ -326,9 +326,9 @@ fn translate_instruction(
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
 
-            insts.push(RiscvInstruction::Bnez(cond, then_tag));
+            insts.push(RiscvInstruction::Beqz(cond, else_tag));
             config.table.reset(cond);
-            insts.push(RiscvInstruction::Jump(else_tag));
+            insts.push(RiscvInstruction::Jump(then_tag));
         }
         ValueKind::Jump(jump) => {
             let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
