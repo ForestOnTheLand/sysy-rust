@@ -91,25 +91,35 @@ impl PartialEq for Register {
 
 impl Eq for Register {}
 
-/// Record the state of registers (occupied or not)
-pub struct RegisterTable {
+pub struct RegGroup {
+    list: &'static [u8],
     state: [bool; 32],
-    available: i32,
 }
 
-impl RegisterTable {
-    pub fn new() -> RegisterTable {
-        RegisterTable {
+impl RegGroup {
+    const TEMP: [u8; 6] = [6, 7, 28, 29, 30, 31];
+    const STORE: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+
+    pub fn new_temp() -> Self {
+        Self {
+            list: &Self::TEMP,
             state: [false; 32],
-            available: 7,
         }
+    }
+    pub fn new_store() -> Self {
+        Self {
+            list: &Self::STORE,
+            state: [false; 32],
+        }
+    }
+    pub fn num(&self) -> usize {
+        self.list.len()
     }
 
     pub fn get_vaccant(&mut self) -> Register {
-        for id in Register::TMP_REG {
+        for id in self.list.iter().cloned() {
             if !self.state[id as usize] {
                 self.state[id as usize] = true;
-                self.available -= 1;
                 return Register { id };
             }
         }
@@ -117,20 +127,14 @@ impl RegisterTable {
     }
 
     pub fn reset(&mut self, reg: Register) {
-        if !Register::TMP_REG.contains(&reg.id) {
+        if !self.list.contains(&reg.id) {
             return;
         }
         if self.state[reg.id as usize] {
             self.state[reg.id as usize] = false;
-            self.available += 1;
         } else {
             panic!("register {reg} is not being occupied now");
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn remain(&self) -> i32 {
-        self.available
     }
 }
 

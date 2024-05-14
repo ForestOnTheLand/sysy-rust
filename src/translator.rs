@@ -94,7 +94,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
     let mut config = TranslateConfig {
         program,
         func_data,
-        table: RegisterTable::new(),
+        table: RegGroup::new_temp(),
         symbol: AllocTable::new(),
         stack_size,
         save_ra,
@@ -160,7 +160,7 @@ fn allocate_stack(func_data: &FunctionData) -> (usize, bool, i32) {
 struct TranslateConfig<'a> {
     program: &'a Program,
     func_data: &'a FunctionData,
-    table: RegisterTable,
+    table: RegGroup,
     symbol: AllocTable,
     stack_size: usize,
     save_ra: bool,

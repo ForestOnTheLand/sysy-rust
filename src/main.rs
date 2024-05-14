@@ -7,6 +7,8 @@ mod ast;
 mod build_util;
 /// Build KoopaIR from AST
 mod builder;
+/// Value lifetime checker
+mod lifetime;
 /// Optimizer
 mod optimizer;
 /// RISCV
