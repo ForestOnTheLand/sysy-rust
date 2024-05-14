@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashMap},
 };
 
-use koopa::ir::{FunctionData, Value};
+use koopa::ir::{FunctionData, Value, ValueKind};
 
 use crate::translate_util::{RegGroup, Register};
 
@@ -53,7 +53,9 @@ impl LifeTime {
         }
         for (_, bb) in func.layout().bbs() {
             for (value, _) in bb.insts() {
-                if func.dfg().value(*value).ty().is_unit() {
+                if func.dfg().value(*value).ty().is_unit()
+                    || matches!(func.dfg().value(*value).kind(), ValueKind::Alloc(_))
+                {
                     continue;
                 }
                 let mut l = u32::MAX;
@@ -150,7 +152,7 @@ impl Allocator {
             if inst.start >= id {
                 break;
             }
-            if inst.end > id {
+            if inst.end >= id {
                 if let Some(r) = self.allocation.get(&inst.value) {
                     registers.push(*r);
                 }
