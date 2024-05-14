@@ -35,8 +35,8 @@ impl Ord for ActiveVariable {
 
 #[derive(Debug, Clone)]
 pub struct LifeTime {
-    index: HashMap<Value, u32>,
-    interval: HashMap<Value, (u32, u32)>,
+    pub index: HashMap<Value, u32>,
+    pub interval: HashMap<Value, (u32, u32)>,
     insts: Vec<ActiveVariable>,
 }
 
@@ -53,6 +53,9 @@ impl LifeTime {
         }
         for (_, bb) in func.layout().bbs() {
             for (value, _) in bb.insts() {
+                if func.dfg().value(*value).ty().is_unit() {
+                    continue;
+                }
                 let mut l = u32::MAX;
                 let mut r = 0u32;
                 for friend in func.dfg().value(*value).used_by() {
@@ -60,7 +63,7 @@ impl LifeTime {
                     l = min(l, id);
                     r = max(r, id);
                 }
-                interval.insert(value.clone(), (l, r));
+                interval.insert(value.clone(), (min(l, *index.get(value).unwrap()), r));
             }
         }
         let mut insts: Vec<ActiveVariable> = interval
@@ -84,7 +87,7 @@ impl LifeTime {
 #[derive(Debug)]
 pub struct Allocator {
     pub allocation: HashMap<Value, Register>,
-    lifetime: LifeTime,
+    pub lifetime: LifeTime,
     active: BTreeSet<ActiveVariable>,
     regs: RegGroup,
 }
@@ -144,10 +147,10 @@ impl Allocator {
         let mut registers = Vec::new();
         let id = self.lifetime.index.get(&value).unwrap().clone();
         for inst in self.lifetime.insts.iter().cloned() {
-            if inst.start > id {
+            if inst.start >= id {
                 break;
             }
-            if inst.end >= id {
+            if inst.end > id {
                 if let Some(r) = self.allocation.get(&inst.value) {
                     registers.push(*r);
                 }

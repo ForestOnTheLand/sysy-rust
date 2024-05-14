@@ -86,13 +86,13 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 
     let func_name = function_name(func_data).unwrap();
     let lifetime = LifeTime::new(func_data);
+    println!("{:#?}", lifetime);
     let allocator = Allocator::linear_scan_register_allocation(lifetime);
 
-    let (stack_size, save_ra, init_pos) = allocate_stack(func_data, &allocator);
+    let stack_layout = allocate_stack(func_data, &allocator);
 
     let mut function = RiscvFunction {
-        stack_size,
-        save_ra,
+        stack_layout: stack_layout.clone(),
         blocks: Vec::new(),
     };
 
@@ -101,9 +101,8 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         func_data,
         table: RegGroup::new_temp(),
         symbol: AllocTable::new(),
-        stack_size,
-        save_ra,
-        stack_pos: Box::new(init_pos),
+        stack_layout: stack_layout.clone(),
+        stack_pos: Box::new(stack_layout.args as i32 * 4),
         allocator,
     };
 
@@ -133,9 +132,8 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 /// - space for local variable
 /// - space for saving RISCV register `ra` (short for "return address")
 /// - space for function arguments
-fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> (usize, bool, i32) {
+fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> StackLayout {
     let mut local = 0;
-    let mut ra = 0;
     let mut args = 0;
     let mut save = 0;
     for (_bb, node) in func_data.layout().bbs() {
@@ -152,18 +150,20 @@ fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> (usize, bo
                 local += size;
             }
             if let ValueKind::Call(call) = func_data.dfg().value(inst).kind() {
-                ra = 4;
                 if call.args().len() > 8 {
                     args = max(args, call.args().len() - 8);
                 }
-                save = max(save, allocator.get_occupied_registers(inst).len());
+                save = max(save, 1 + allocator.get_occupied_registers(inst).len());
             }
         }
     }
-    let total = local + ra + args * 4 + save * 4;
+    let total = local + args * 4 + save * 4;
     let stack_size = (total + 15) & !0xf;
-    // We add some additional bytes to save caller-save registers
-    (stack_size, ra != 0, (args * 4) as i32)
+    StackLayout {
+        total: stack_size,
+        args,
+        save,
+    }
 }
 
 struct TranslateConfig<'a> {
@@ -171,8 +171,7 @@ struct TranslateConfig<'a> {
     func_data: &'a FunctionData,
     table: RegGroup,
     symbol: AllocTable,
-    stack_size: usize,
-    save_ra: bool,
+    stack_layout: StackLayout,
     stack_pos: Box<i32>,
     allocator: Allocator,
 }
@@ -184,7 +183,11 @@ fn translate_instruction(
     config: &mut TranslateConfig,
 ) {
     match config.allocator.allocation.get(&value) {
-        Some(r) => insts.push(RiscvInstruction::Comment(format!("value in {r}"))),
+        Some(r) => insts.push(RiscvInstruction::Comment(format!(
+            "{}: value in {r}, lifetime {:?}",
+            config.allocator.lifetime.index.get(&value).unwrap(),
+            config.allocator.lifetime.interval.get(&value).unwrap()
+        ))),
         None => insts.push(RiscvInstruction::Comment(format!("value on stack"))),
     }
     match config.func_data.dfg().value(value).kind() {
@@ -353,6 +356,7 @@ fn translate_instruction(
             for (i, reg) in caller_saved.iter().enumerate() {
                 insts.push(RiscvInstruction::Mv(Register::S[i], *reg));
             }
+            insts.push(RiscvInstruction::Comment(format!("{caller_saved:?}")));
             //
             for (i, &arg) in call.args().iter().enumerate() {
                 let mut reg = prepare_value(arg, insts, config);
@@ -390,10 +394,7 @@ fn translate_instruction(
                 }
                 None => {}
             };
-            insts.push(RiscvInstruction::Ret {
-                stack_size: config.stack_size,
-                save_ra: config.save_ra,
-            });
+            insts.push(RiscvInstruction::Ret(config.stack_layout.clone()));
         }
     }
 }
@@ -432,7 +433,7 @@ fn prepare_value(
                     Register::A[arg.index()]
                 } else {
                     let reg = config.table.get_vaccant();
-                    let offset = config.stack_size + (arg.index() - 8) * 4;
+                    let offset = config.stack_layout.total + (arg.index() - 8) * 4;
                     insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::SP));
                     reg
                 }

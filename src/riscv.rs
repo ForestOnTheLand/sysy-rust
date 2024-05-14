@@ -1,6 +1,6 @@
 use crate::translate_util::Register;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct StackLayout {
     pub args: usize,
     pub save: usize,
@@ -21,8 +21,7 @@ pub struct RiscvValue {
 
 #[derive(Debug)]
 pub struct RiscvFunction {
-    pub stack_size: usize,
-    pub save_ra: bool,
+    pub stack_layout: StackLayout,
     pub blocks: Vec<RiscvBlock>,
 }
 
@@ -43,7 +42,7 @@ pub enum RiscvInstruction {
     Bnez(Register, String),
     Jump(String),
     Call(String),
-    Ret { stack_size: usize, save_ra: bool },
+    Ret(StackLayout),
     // Memory
     Lw(Register, i32, Register),
     Sw(Register, i32, Register),
@@ -122,7 +121,7 @@ impl std::fmt::Display for RiscvFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = &self.blocks[0].name;
         writeln!(f, "  .globl {}\n{}:", name, name)?;
-        let stack_size = self.stack_size;
+        let stack_size = self.stack_layout.total;
         if stack_size != 0 {
             if stack_size < 2048 {
                 writeln!(f, "  addi sp, sp, -{}", stack_size)?;
@@ -131,13 +130,13 @@ impl std::fmt::Display for RiscvFunction {
                 writeln!(f, "  sub sp, sp, t0")?;
             }
         }
-        if self.save_ra {
-            if stack_size - 4 < 2048 {
-                writeln!(f, "  sw ra, {}(sp)", stack_size - 4)?;
-            } else {
-                writeln!(f, "  li t0, {}", stack_size - 4)?;
-                writeln!(f, "  add t0, t0, sp")?;
-                writeln!(f, "  sw ra, 0(t0)")?;
+        if self.stack_layout.save != 0 {
+            writeln!(f, "  li t0, {}", self.stack_layout.total - 4)?;
+            writeln!(f, "  add t0, t0, sp")?;
+            writeln!(f, "  sw ra, (t0)")?;
+            for i in 1..self.stack_layout.save {
+                writeln!(f, "  addi t0, t0, -4")?;
+                writeln!(f, "  sw s{}, (t0)", i - 1)?;
             }
         }
         for (i, block) in self.blocks.iter().enumerate() {
@@ -161,24 +160,21 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Bnez(d, s) => writeln!(f, "  bnez {d}, {s}"),
             RiscvInstruction::Jump(label) => writeln!(f, "  j {label}"),
             RiscvInstruction::Call(label) => writeln!(f, "  call {label}"),
-            RiscvInstruction::Ret {
-                stack_size,
-                save_ra,
-            } => {
-                if *save_ra {
-                    if stack_size - 4 < 2048 {
-                        writeln!(f, "  lw ra, {}(sp)", stack_size - 4)?;
-                    } else {
-                        writeln!(f, "  li t0, {}", stack_size - 4)?;
-                        writeln!(f, "  add t0, t0, sp")?;
-                        writeln!(f, "  lw ra, 0(t0)")?;
+            RiscvInstruction::Ret(layout) => {
+                if layout.save != 0 {
+                    writeln!(f, "  li t0, {}", layout.total - 4)?;
+                    writeln!(f, "  add t0, t0, sp")?;
+                    writeln!(f, "  lw ra, (t0)")?;
+                    for i in 1..layout.save {
+                        writeln!(f, "  addi t0, t0, -4")?;
+                        writeln!(f, "  lw s{}, (t0)", i - 1)?;
                     }
                 }
-                if *stack_size > 0 {
-                    if *stack_size < 2048 {
-                        writeln!(f, "  addi sp, sp, {}", stack_size)?;
+                if layout.total > 0 {
+                    if layout.total < 2048 {
+                        writeln!(f, "  addi sp, sp, {}", layout.total)?;
                     } else {
-                        writeln!(f, "  li t0, {}", stack_size)?;
+                        writeln!(f, "  li t0, {}", layout.total)?;
                         writeln!(f, "  add sp, sp, t0")?;
                     }
                 }
