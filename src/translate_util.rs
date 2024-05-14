@@ -91,6 +91,7 @@ impl PartialEq for Register {
 
 impl Eq for Register {}
 
+#[derive(Debug)]
 pub struct RegGroup {
     list: &'static [u8],
     state: [bool; 32],

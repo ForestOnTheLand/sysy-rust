@@ -7,28 +7,29 @@ use koopa::ir::{FunctionData, Value};
 
 use crate::translate_util::{RegGroup, Register};
 
-#[derive(Eq, Clone, Copy)]
+#[derive(Eq, Clone, Copy, Debug)]
 struct ActiveVariable {
     value: Value,
     start: u32,
+    id: u32,
     end: u32,
 }
 
 impl PartialEq for ActiveVariable {
     fn eq(&self, other: &Self) -> bool {
-        self.end == other.end
+        self.id == other.id
     }
 }
 
 impl PartialOrd for ActiveVariable {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.end.partial_cmp(&other.end)
+        (self.end, self.id).partial_cmp(&(other.end, other.id))
     }
 }
 
 impl Ord for ActiveVariable {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.end.cmp(&other.end)
+        (self.end, self.id).cmp(&(other.end, other.id))
     }
 }
 
@@ -39,7 +40,7 @@ pub struct LifeTime {
 }
 
 impl LifeTime {
-    fn new(func: &FunctionData) -> Self {
+    pub fn new(func: &FunctionData) -> Self {
         let mut index = HashMap::new();
         let mut interval = HashMap::new();
         let mut i = 1;
@@ -66,6 +67,7 @@ impl LifeTime {
             .map(|(v, (l, r))| ActiveVariable {
                 value: *v,
                 start: *l,
+                id: *index.get(v).unwrap(),
                 end: *r,
             })
             .collect();
@@ -78,9 +80,10 @@ impl LifeTime {
     }
 }
 
+#[derive(Debug)]
 pub struct Allocator {
     active: BTreeSet<ActiveVariable>,
-    allocation: HashMap<Value, Register>,
+    pub allocation: HashMap<Value, Register>,
     regs: RegGroup,
 }
 
@@ -98,7 +101,7 @@ impl Allocator {
             } else {
                 let reg = allocator.regs.get_vaccant();
                 allocator.allocation.insert(inst.value, reg);
-                allocator.active.insert(inst);
+                assert!(allocator.active.insert(inst));
             }
         }
         allocator
@@ -111,7 +114,8 @@ impl Allocator {
                     return;
                 }
                 self.active.pop_first();
-                self.regs.reset(*self.allocation.get(&var.value).unwrap());
+                let reg = *self.allocation.get(&var.value).unwrap();
+                self.regs.reset(reg);
             } else {
                 break;
             }
@@ -123,8 +127,8 @@ impl Allocator {
         if spill.end > inst.end {
             let reg = self.allocation.remove(&spill.value).unwrap().clone();
             self.allocation.insert(inst.value, reg);
-            self.active.remove(&spill);
-            self.active.insert(inst);
+            assert!(self.active.remove(&spill));
+            assert!(self.active.insert(inst));
         }
     }
 }

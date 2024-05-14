@@ -2,6 +2,8 @@
 //! Instead of implementing a `trait` as is described in the writeup,
 //! the core of the file is implemented in the function [`translate_program`].
 
+use crate::lifetime::Allocator;
+use crate::lifetime::LifeTime;
 use crate::riscv::*;
 use crate::translate_util::*;
 use koopa::ir::{
@@ -91,6 +93,10 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         blocks: Vec::new(),
     };
 
+    let lifetime = LifeTime::new(func_data);
+
+    println!("Lifetime calculated");
+
     let mut config = TranslateConfig {
         program,
         func_data,
@@ -99,6 +105,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         stack_size,
         save_ra,
         stack_pos: Box::new(init_pos),
+        allocator: Allocator::linear_scan_register_allocation(&lifetime),
     };
 
     for (&bb, node) in func_data.layout().bbs() {
@@ -165,6 +172,7 @@ struct TranslateConfig<'a> {
     stack_size: usize,
     save_ra: bool,
     stack_pos: Box<i32>,
+    allocator: Allocator,
 }
 
 /// Translate a single KoopaIR instruction into several RISCV instructions.
@@ -173,6 +181,10 @@ fn translate_instruction(
     insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
 ) {
+    match config.allocator.allocation.get(&value) {
+        Some(r) => insts.push(RiscvInstruction::Comment(format!("value in {r}"))),
+        None => insts.push(RiscvInstruction::Comment(format!("value on stack"))),
+    }
     match config.func_data.dfg().value(value).kind() {
         ValueKind::Integer(_) => unreachable!(),
         ValueKind::ZeroInit(_) => unreachable!(),
