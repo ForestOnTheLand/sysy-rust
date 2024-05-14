@@ -59,6 +59,21 @@ impl Register {
         Register::A7,
     ];
 
+    pub const S: [Register; 12] = [
+        Register::S0,
+        Register::S1,
+        Register::S2,
+        Register::S3,
+        Register::S4,
+        Register::S5,
+        Register::S6,
+        Register::S7,
+        Register::S8,
+        Register::S9,
+        Register::S10,
+        Register::S11,
+    ];
+
     /// names of registers, see <https://pku-minic.github.io/online-doc/#/misc-app-ref/riscv-insts>
     /// for more detailed information
     const NAME: [&'static str; 32] = [
@@ -66,8 +81,6 @@ impl Register {
         "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
         "t5", "t6",
     ];
-    /// temp registers that are allowed to use freely, namely t0~t6
-    const TMP_REG: [u8; 6] = [6, 7, 28, 29, 30, 31];
 }
 
 impl Register {
@@ -98,8 +111,8 @@ pub struct RegGroup {
 }
 
 impl RegGroup {
-    const TEMP: [u8; 6] = [6, 7, 28, 29, 30, 31];
-    const STORE: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+    const TEMP: [u8; 10] = [6, 7, 28, 29, 30, 31, 24, 25, 26, 27];
+    const STORE: [u8; 7] = [11, 12, 13, 14, 15, 16, 17];
 
     pub fn new_temp() -> Self {
         Self {
@@ -140,6 +153,7 @@ impl RegGroup {
 }
 
 /// Record the position (register or stack) of a single variable.
+#[derive(PartialEq)]
 pub enum AllocPos {
     #[allow(dead_code)]
     Reg(Register), // x = %reg

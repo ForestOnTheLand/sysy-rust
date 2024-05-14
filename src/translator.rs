@@ -10,6 +10,7 @@ use koopa::ir::{
     entities::ValueData, values::Aggregate, BasicBlock, BinaryOp, FunctionData, Program, TypeKind,
     Value, ValueKind,
 };
+use std::cmp::min;
 use std::{cmp::max, io};
 
 pub fn output_program(program: &RiscvProgram, output: impl io::Write) {
@@ -161,7 +162,8 @@ fn allocate_stack(func_data: &FunctionData) -> (usize, bool, i32) {
     }
     let total = local + ra + args * 4;
     let stack_size = (total + 15) & !0xf;
-    (stack_size, ra != 0, (args * 4) as i32)
+    // We add 64 additional bytes to save caller-save registers
+    (stack_size + 64, ra != 0, (args * 4) as i32)
 }
 
 struct TranslateConfig<'a> {
@@ -219,7 +221,7 @@ fn translate_instruction(
                 reg
             };
 
-            save_stack(value, reg, insts, config);
+            save_value(value, reg, insts, config);
         }
         ValueKind::Store(store) => match config.func_data.dfg().value(store.value()).kind() {
             ValueKind::Aggregate(list) => {
@@ -261,7 +263,7 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(index);
-            save_stack(value, reg, insts, config);
+            save_value(value, reg, insts, config);
         }
         ValueKind::GetElemPtr(get) => {
             let (reg, s) = if get.src().is_global() {
@@ -292,7 +294,7 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(index);
-            save_stack(value, reg, insts, config);
+            save_value(value, reg, insts, config);
         }
 
         ValueKind::Binary(bin) => {
@@ -331,7 +333,7 @@ fn translate_instruction(
                 _ => unimplemented!(),
             };
 
-            save_stack(value, res, insts, config);
+            save_value(value, res, insts, config);
         }
         ValueKind::Branch(branch) => {
             let cond = prepare_value(branch.cond(), insts, config);
@@ -365,7 +367,7 @@ fn translate_instruction(
             let func_name = function_name(callee_data).unwrap();
             insts.push(RiscvInstruction::Call(func_name));
             if !config.func_data.dfg().value(value).ty().is_unit() {
-                save_stack(value, Register::A0, insts, config);
+                save_value(value, Register::A0, insts, config);
             }
         }
         ValueKind::Return(ret) => {
@@ -429,17 +431,26 @@ fn prepare_value(
     }
 }
 
-fn save_stack(
+fn save_value(
     value: Value,
     reg: Register,
     insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
 ) {
-    config.symbol.store_stack(value, *config.stack_pos);
-    let pos = *config.stack_pos;
-    insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
-    config.table.reset(reg);
-    *config.stack_pos += 4;
+    match config.allocator.allocation.get(&value) {
+        Some(dst) => {
+            config.symbol.store_register(value, *dst);
+            insts.push(RiscvInstruction::Mv(*dst, reg));
+            config.table.reset(reg);
+        }
+        None => {
+            config.symbol.store_stack(value, *config.stack_pos);
+            let pos = *config.stack_pos;
+            insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
+            config.table.reset(reg);
+            *config.stack_pos += 4;
+        }
+    }
 }
 
 // Helper functions
