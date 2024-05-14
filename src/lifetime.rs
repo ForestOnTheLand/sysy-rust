@@ -33,6 +33,8 @@ impl Ord for ActiveVariable {
     }
 }
 
+/// A wrapper around [`koopa::ir::entities::ValueData::used_by`].
+/// This records the lifetime info of a [`Value`].
 #[derive(Debug, Clone)]
 pub struct LifeTime {
     pub index: HashMap<Value, u32>,
@@ -86,6 +88,7 @@ impl LifeTime {
     }
 }
 
+/// Inspired by [LSRA](https://en.wikipedia.org/wiki/Live_variable_analysis).
 #[derive(Debug)]
 pub struct Allocator {
     pub allocation: HashMap<Value, Register>,
@@ -123,7 +126,9 @@ impl Allocator {
     fn expire_old_intervals(&mut self, inst: ActiveVariable) {
         loop {
             if let Some(&var) = self.active.first() {
-                if var.end >= inst.start {
+                // Different from the reference, I changed ">=" into ">",
+                // which may have a significant change on the generated code.
+                if var.end > inst.start {
                     return;
                 }
                 self.active.pop_first();
@@ -145,7 +150,7 @@ impl Allocator {
         }
     }
 
-    pub fn get_occupied_registers(&self, value: Value) -> Vec<Register> {
+    pub fn get_occupied_registers(&self, value: Value) -> Vec<(Register, bool)> {
         let mut registers = Vec::new();
         let id = self.lifetime.index.get(&value).unwrap().clone();
         for inst in self.lifetime.insts.iter().cloned() {
@@ -154,7 +159,7 @@ impl Allocator {
             }
             if inst.end >= id {
                 if let Some(r) = self.allocation.get(&inst.value) {
-                    registers.push(*r);
+                    registers.push((*r, inst.end > id));
                 }
             }
         }

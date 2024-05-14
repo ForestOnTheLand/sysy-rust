@@ -353,14 +353,14 @@ fn translate_instruction(
         }
         ValueKind::Call(call) => {
             let caller_saved = config.allocator.get_occupied_registers(value);
-            for (i, reg) in caller_saved.iter().enumerate() {
+            for (i, (reg, _)) in caller_saved.iter().enumerate() {
                 insts.push(RiscvInstruction::Mv(Register::S[i], *reg));
             }
             insts.push(RiscvInstruction::Comment(format!("{caller_saved:?}")));
             //
             for (i, &arg) in call.args().iter().enumerate() {
                 let mut reg = prepare_value(arg, insts, config);
-                if let Some(index) = caller_saved.iter().position(|r| *r == reg) {
+                if let Some(index) = caller_saved.iter().position(|(r, _)| *r == reg) {
                     reg = Register::S[index];
                 }
                 if i < 8 {
@@ -381,8 +381,10 @@ fn translate_instruction(
             if !config.func_data.dfg().value(value).ty().is_unit() {
                 save_value(value, Register::A0, insts, config);
             }
-            for (i, reg) in caller_saved.iter().enumerate() {
-                insts.push(RiscvInstruction::Mv(*reg, Register::S[i]));
+            for (i, (reg, need_load)) in caller_saved.iter().enumerate() {
+                if *need_load {
+                    insts.push(RiscvInstruction::Mv(*reg, Register::S[i]));
+                }
             }
         }
         ValueKind::Return(ret) => {
