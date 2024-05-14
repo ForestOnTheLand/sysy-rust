@@ -211,15 +211,16 @@ fn translate_instruction(
         }
         ValueKind::GlobalAlloc(_) => unreachable!(),
         ValueKind::Load(load) => {
+            let expected = config.allocator.allocation.get(&value).cloned();
             let reg = if load.src().is_global() {
-                let reg = config.table.get_vaccant();
+                let reg = expected.unwrap_or_else(|| config.table.get_vaccant());
                 let value_data = config.program.borrow_value(load.src());
                 let name = global_variable_name(&value_data).unwrap();
                 insts.push(RiscvInstruction::La(reg, name));
                 insts.push(RiscvInstruction::Lw(reg, 0, reg));
                 reg
             } else {
-                let reg = prepare_value(load.src(), insts, config);
+                let reg = prepare_value(load.src(), insts, config, expected);
                 insts.push(RiscvInstruction::Lw(reg, 0, reg));
                 reg
             };
@@ -232,14 +233,14 @@ fn translate_instruction(
                 let values = local_unpack(config.func_data, list);
                 let pos = config.symbol.get_stack_pointer(&store.dest());
                 for (index, value) in values.into_iter().enumerate() {
-                    let reg = prepare_value(value, insts, config);
+                    let reg = prepare_value(value, insts, config, None);
                     let offset = pos + (index as i32) * 4;
                     insts.push(RiscvInstruction::Sw(reg, offset, Register::SP));
                     config.table.reset(reg);
                 }
             }
             _ => {
-                let reg = prepare_value(store.value(), insts, config);
+                let reg = prepare_value(store.value(), insts, config, None);
                 if store.dest().is_global() {
                     let value_data = config.program.borrow_value(store.dest());
                     let name = global_variable_name(&value_data).unwrap();
@@ -248,7 +249,7 @@ fn translate_instruction(
                     insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     config.table.reset(tmp);
                 } else {
-                    let pos = prepare_value(store.dest(), insts, config);
+                    let pos = prepare_value(store.dest(), insts, config, None);
                     insts.push(RiscvInstruction::Sw(reg, 0, pos));
                     config.table.reset(pos);
                 }
@@ -257,12 +258,12 @@ fn translate_instruction(
         },
         ValueKind::GetPtr(get) => {
             assert!(!get.src().is_global());
-            let reg = prepare_value(get.src(), insts, config);
+            let reg = prepare_value(get.src(), insts, config, None);
             let s = match config.func_data.dfg().value(get.src()).ty().kind() {
                 TypeKind::Pointer(ty) => ty.size(),
                 _ => unreachable!(),
             };
-            let index = prepare_value(get.index(), insts, config);
+            let index = prepare_value(get.index(), insts, config, None);
             insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(index);
@@ -283,7 +284,7 @@ fn translate_instruction(
                 };
                 (tmp, s)
             } else {
-                let pos = prepare_value(get.src(), insts, config);
+                let pos = prepare_value(get.src(), insts, config, None);
                 let s = match config.func_data.dfg().value(get.src()).ty().kind() {
                     TypeKind::Pointer(array) => match array.kind() {
                         TypeKind::Array(elem, _) => elem.size(),
@@ -293,7 +294,7 @@ fn translate_instruction(
                 };
                 (pos, s)
             };
-            let index = prepare_value(get.index(), insts, config);
+            let index = prepare_value(get.index(), insts, config, None);
             insts.push(RiscvInstruction::Muli(index, index, s as i32));
             insts.push(RiscvInstruction::Add(reg, reg, index));
             config.table.reset(index);
@@ -301,11 +302,12 @@ fn translate_instruction(
         }
 
         ValueKind::Binary(bin) => {
-            let left = prepare_value(bin.lhs(), insts, config);
-            let right = prepare_value(bin.rhs(), insts, config);
+            let left = prepare_value(bin.lhs(), insts, config, None);
+            let right = prepare_value(bin.rhs(), insts, config, None);
             config.table.reset(left);
             config.table.reset(right);
-            let res = config.table.get_vaccant();
+            let expected = config.allocator.allocation.get(&value).cloned();
+            let res = expected.unwrap_or_else(|| config.table.get_vaccant());
 
             match bin.op() {
                 BinaryOp::Add => insts.push(RiscvInstruction::Add(res, left, right)),
@@ -339,7 +341,7 @@ fn translate_instruction(
             save_value(value, res, insts, config);
         }
         ValueKind::Branch(branch) => {
-            let cond = prepare_value(branch.cond(), insts, config);
+            let cond = prepare_value(branch.cond(), insts, config, None);
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
 
@@ -359,7 +361,7 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Comment(format!("{caller_saved:?}")));
             //
             for (i, &arg) in call.args().iter().enumerate() {
-                let mut reg = prepare_value(arg, insts, config);
+                let mut reg = prepare_value(arg, insts, config, None);
                 if let Some(index) = caller_saved.iter().position(|(r, _)| *r == reg) {
                     reg = Register::S[index];
                 }
@@ -390,7 +392,7 @@ fn translate_instruction(
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
-                    let reg = prepare_value(val, insts, config);
+                    let reg = prepare_value(val, insts, config, None);
                     insts.push(RiscvInstruction::Mv(Register::A0, reg));
                     config.table.reset(reg);
                 }
@@ -405,18 +407,19 @@ fn prepare_value(
     value: Value,
     insts: &mut Vec<RiscvInstruction>,
     config: &mut TranslateConfig,
+    reg: Option<Register>, // hint that indicates which register is preferred; not forced.
 ) -> Register {
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
         Some(AllocPos::Stack(pos)) => {
             let pos = *pos;
-            let reg = config.table.get_vaccant();
+            let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
             insts.push(RiscvInstruction::Lw(reg, pos, Register::SP));
             reg
         }
         Some(AllocPos::StackPointer(pos)) => {
             let pos = *pos;
-            let reg = config.table.get_vaccant();
+            let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
             insts.push(RiscvInstruction::Addi(reg, Register::SP, pos));
             reg
         }
@@ -454,7 +457,9 @@ fn save_value(
     match config.allocator.allocation.get(&value) {
         Some(dst) => {
             config.symbol.store_register(value, *dst);
-            insts.push(RiscvInstruction::Mv(*dst, reg));
+            if *dst != reg {
+                insts.push(RiscvInstruction::Mv(*dst, reg));
+            }
             config.table.reset(reg);
         }
         None => {
