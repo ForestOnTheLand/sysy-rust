@@ -1,4 +1,7 @@
-use crate::riscv::{RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram};
+use crate::{
+    riscv::{RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram},
+    translate_util::Register,
+};
 
 impl RiscvProgram {
     pub fn optimize(&mut self) {
@@ -19,21 +22,33 @@ impl RiscvFunction {
             let num = block.instructions.len();
             for i in 0..num {
                 match block.instructions[i] {
-                    Comment(_) => {
-                        block.instructions[i] = Nop;
-                    }
+                    Comment(_) => block.instructions[i] = Nop,
                     Xori(d, s, 0) => {
                         if d == s {
-                            block.instructions[i] = Nop;
+                            block.instructions[i] = Nop
                         }
                     }
                     Mv(d, s) => {
                         if d == s {
-                            block.instructions[i] = Nop;
+                            block.instructions[i] = Nop
+                        }
+                    }
+                    Muli(dst, _, _) => {
+                        if dst == Register::X0 {
+                            block.instructions[i] = Nop
+                        }
+                    }
+                    Add(dst, a, b) => {
+                        if b == Register::X0 {
+                            if dst == a {
+                                block.instructions[i] = Nop
+                            } else {
+                                block.instructions[i] = Mv(dst, a)
+                            }
                         }
                     }
                     _ => {}
-                }
+                };
             }
             block.clear_nop();
         }
