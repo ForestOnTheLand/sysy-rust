@@ -1,6 +1,13 @@
 use crate::translate_util::Register;
 
 #[derive(Debug)]
+pub struct StackLayout {
+    pub args: usize,
+    pub save: usize,
+    pub total: usize,
+}
+
+#[derive(Debug)]
 pub struct RiscvProgram {
     pub values: Vec<RiscvValue>,
     pub functions: Vec<RiscvFunction>,

@@ -10,7 +10,6 @@ use koopa::ir::{
     entities::ValueData, values::Aggregate, BasicBlock, BinaryOp, FunctionData, Program, TypeKind,
     Value, ValueKind,
 };
-use std::cmp::min;
 use std::{cmp::max, io};
 
 pub fn output_program(program: &RiscvProgram, output: impl io::Write) {
@@ -86,17 +85,16 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
     }
 
     let func_name = function_name(func_data).unwrap();
-    let (stack_size, save_ra, init_pos) = allocate_stack(func_data);
+    let lifetime = LifeTime::new(func_data);
+    let allocator = Allocator::linear_scan_register_allocation(lifetime);
+
+    let (stack_size, save_ra, init_pos) = allocate_stack(func_data, &allocator);
 
     let mut function = RiscvFunction {
         stack_size,
         save_ra,
         blocks: Vec::new(),
     };
-
-    let lifetime = LifeTime::new(func_data);
-
-    println!("Lifetime calculated");
 
     let mut config = TranslateConfig {
         program,
@@ -106,7 +104,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         stack_size,
         save_ra,
         stack_pos: Box::new(init_pos),
-        allocator: Allocator::linear_scan_register_allocation(&lifetime),
+        allocator,
     };
 
     for (&bb, node) in func_data.layout().bbs() {
@@ -135,10 +133,11 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 /// - space for local variable
 /// - space for saving RISCV register `ra` (short for "return address")
 /// - space for function arguments
-fn allocate_stack(func_data: &FunctionData) -> (usize, bool, i32) {
+fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> (usize, bool, i32) {
     let mut local = 0;
     let mut ra = 0;
     let mut args = 0;
+    let mut save = 0;
     for (_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
             if !func_data.dfg().value(inst).ty().is_unit() {
@@ -157,13 +156,14 @@ fn allocate_stack(func_data: &FunctionData) -> (usize, bool, i32) {
                 if call.args().len() > 8 {
                     args = max(args, call.args().len() - 8);
                 }
+                save = max(save, allocator.get_occupied_registers(inst).len());
             }
         }
     }
-    let total = local + ra + args * 4;
+    let total = local + ra + args * 4 + save * 4;
     let stack_size = (total + 15) & !0xf;
-    // We add 64 additional bytes to save caller-save registers
-    (stack_size + 64, ra != 0, (args * 4) as i32)
+    // We add some additional bytes to save caller-save registers
+    (stack_size, ra != 0, (args * 4) as i32)
 }
 
 struct TranslateConfig<'a> {
@@ -349,8 +349,16 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Jump(jmp_tag));
         }
         ValueKind::Call(call) => {
+            let caller_saved = config.allocator.get_occupied_registers(value);
+            for (i, reg) in caller_saved.iter().enumerate() {
+                insts.push(RiscvInstruction::Mv(Register::S[i], *reg));
+            }
+            //
             for (i, &arg) in call.args().iter().enumerate() {
-                let reg = prepare_value(arg, insts, config);
+                let mut reg = prepare_value(arg, insts, config);
+                if let Some(index) = caller_saved.iter().position(|r| *r == reg) {
+                    reg = Register::S[index];
+                }
                 if i < 8 {
                     insts.push(RiscvInstruction::Mv(Register::A[i], reg));
                 } else {
@@ -368,6 +376,9 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Call(func_name));
             if !config.func_data.dfg().value(value).ty().is_unit() {
                 save_value(value, Register::A0, insts, config);
+            }
+            for (i, reg) in caller_saved.iter().enumerate() {
+                insts.push(RiscvInstruction::Mv(*reg, Register::S[i]));
             }
         }
         ValueKind::Return(ret) => {

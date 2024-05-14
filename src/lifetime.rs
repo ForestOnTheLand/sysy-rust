@@ -33,6 +33,7 @@ impl Ord for ActiveVariable {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct LifeTime {
     index: HashMap<Value, u32>,
     interval: HashMap<Value, (u32, u32)>,
@@ -82,14 +83,20 @@ impl LifeTime {
 
 #[derive(Debug)]
 pub struct Allocator {
-    active: BTreeSet<ActiveVariable>,
     pub allocation: HashMap<Value, Register>,
+    lifetime: LifeTime,
+    active: BTreeSet<ActiveVariable>,
     regs: RegGroup,
 }
 
 impl Allocator {
-    pub fn linear_scan_register_allocation(lifetime: &LifeTime) -> Self {
+    pub fn linear_scan_register_allocation(lifetime: LifeTime) -> Self {
         let mut allocator = Allocator {
+            lifetime: LifeTime {
+                index: HashMap::new(),
+                interval: HashMap::new(),
+                insts: Vec::new(),
+            },
             active: BTreeSet::new(),
             allocation: HashMap::new(),
             regs: RegGroup::new_store(),
@@ -104,6 +111,7 @@ impl Allocator {
                 assert!(allocator.active.insert(inst));
             }
         }
+        allocator.lifetime = lifetime;
         allocator
     }
 
@@ -130,5 +138,21 @@ impl Allocator {
             assert!(self.active.remove(&spill));
             assert!(self.active.insert(inst));
         }
+    }
+
+    pub fn get_occupied_registers(&self, value: Value) -> Vec<Register> {
+        let mut registers = Vec::new();
+        let id = self.lifetime.index.get(&value).unwrap().clone();
+        for inst in self.lifetime.insts.iter().cloned() {
+            if inst.start > id {
+                break;
+            }
+            if inst.end >= id {
+                if let Some(r) = self.allocation.get(&inst.value) {
+                    registers.push(*r);
+                }
+            }
+        }
+        registers
     }
 }

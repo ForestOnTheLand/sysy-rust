@@ -112,7 +112,7 @@ pub struct RegGroup {
 
 impl RegGroup {
     const TEMP: [u8; 10] = [6, 7, 28, 29, 30, 31, 24, 25, 26, 27];
-    const STORE: [u8; 7] = [11, 12, 13, 14, 15, 16, 17];
+    const STORE: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
 
     pub fn new_temp() -> Self {
         Self {
