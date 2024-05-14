@@ -122,29 +122,18 @@ impl std::fmt::Display for RiscvFunction {
         let name = &self.blocks[0].name;
         writeln!(f, "  .globl {}\n{}:", name, name)?;
         let stack_size = self.stack_layout.total;
+        if self.stack_layout.save != 0 {
+            writeln!(f, "  sw ra, -4(sp)")?;
+            for i in 1..self.stack_layout.save {
+                writeln!(f, "  sw s{}, -{}(sp)", i - 1, 4 + 4 * i)?;
+            }
+        }
         if stack_size != 0 {
             if stack_size < 2048 {
                 writeln!(f, "  addi sp, sp, -{}", stack_size)?;
             } else {
                 writeln!(f, "  li t0, {stack_size}")?;
                 writeln!(f, "  sub sp, sp, t0")?;
-            }
-        }
-        if self.stack_layout.save != 0 {
-            let stack_size = self.stack_layout.total;
-            if stack_size >= 2048 {
-                writeln!(f, "  li t0, {}", stack_size - 4)?;
-                writeln!(f, "  add t0, t0, sp")?;
-                writeln!(f, "  sw ra, (t0)")?;
-                for i in 1..self.stack_layout.save {
-                    writeln!(f, "  addi t0, t0, -4")?;
-                    writeln!(f, "  sw s{}, (t0)", i - 1)?;
-                }
-            } else {
-                writeln!(f, "  sw ra, {}(sp)", stack_size - 4)?;
-                for i in 1..self.stack_layout.save {
-                    writeln!(f, "  sw s{}, {}(sp)", i - 1, stack_size - 4 - 4 * i)?;
-                }
             }
         }
         for (i, block) in self.blocks.iter().enumerate() {
@@ -169,22 +158,6 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Jump(label) => writeln!(f, "  j {label}"),
             RiscvInstruction::Call(label) => writeln!(f, "  call {label}"),
             RiscvInstruction::Ret(layout) => {
-                if layout.save != 0 {
-                    if layout.total >= 2048 {
-                        writeln!(f, "  li t0, {}", layout.total - 4)?;
-                        writeln!(f, "  add t0, t0, sp")?;
-                        writeln!(f, "  lw ra, (t0)")?;
-                        for i in 1..layout.save {
-                            writeln!(f, "  addi t0, t0, -4")?;
-                            writeln!(f, "  lw s{}, (t0)", i - 1)?;
-                        }
-                    } else {
-                        writeln!(f, "  lw ra, {}(sp)", layout.total - 4)?;
-                        for i in 1..layout.save {
-                            writeln!(f, "  lw s{}, {}(sp)", i - 1, layout.total - 4 - 4 * i)?;
-                        }
-                    }
-                }
                 if layout.total > 0 {
                     if layout.total < 2048 {
                         writeln!(f, "  addi sp, sp, {}", layout.total)?;
@@ -193,6 +166,13 @@ impl std::fmt::Display for RiscvInstruction {
                         writeln!(f, "  add sp, sp, t0")?;
                     }
                 }
+                if layout.save != 0 {
+                    writeln!(f, "  lw ra, -4(sp)")?;
+                    for i in 1..layout.save {
+                        writeln!(f, "  lw s{}, -{}(sp)", i - 1, 4 + 4 * i)?;
+                    }
+                }
+
                 writeln!(f, "  ret")
             }
             RiscvInstruction::Lw(d, i, b) => {
