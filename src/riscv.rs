@@ -131,12 +131,20 @@ impl std::fmt::Display for RiscvFunction {
             }
         }
         if self.stack_layout.save != 0 {
-            writeln!(f, "  li t0, {}", self.stack_layout.total - 4)?;
-            writeln!(f, "  add t0, t0, sp")?;
-            writeln!(f, "  sw ra, (t0)")?;
-            for i in 1..self.stack_layout.save {
-                writeln!(f, "  addi t0, t0, -4")?;
-                writeln!(f, "  sw s{}, (t0)", i - 1)?;
+            let stack_size = self.stack_layout.total;
+            if stack_size >= 2048 {
+                writeln!(f, "  li t0, {}", stack_size - 4)?;
+                writeln!(f, "  add t0, t0, sp")?;
+                writeln!(f, "  sw ra, (t0)")?;
+                for i in 1..self.stack_layout.save {
+                    writeln!(f, "  addi t0, t0, -4")?;
+                    writeln!(f, "  sw s{}, (t0)", i - 1)?;
+                }
+            } else {
+                writeln!(f, "  sw ra, {}(sp)", stack_size - 4)?;
+                for i in 1..self.stack_layout.save {
+                    writeln!(f, "  sw s{}, {}(sp)", i - 1, stack_size - 4 - 4 * i)?;
+                }
             }
         }
         for (i, block) in self.blocks.iter().enumerate() {
@@ -162,12 +170,19 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Call(label) => writeln!(f, "  call {label}"),
             RiscvInstruction::Ret(layout) => {
                 if layout.save != 0 {
-                    writeln!(f, "  li t0, {}", layout.total - 4)?;
-                    writeln!(f, "  add t0, t0, sp")?;
-                    writeln!(f, "  lw ra, (t0)")?;
-                    for i in 1..layout.save {
-                        writeln!(f, "  addi t0, t0, -4")?;
-                        writeln!(f, "  lw s{}, (t0)", i - 1)?;
+                    if layout.total >= 2048 {
+                        writeln!(f, "  li t0, {}", layout.total - 4)?;
+                        writeln!(f, "  add t0, t0, sp")?;
+                        writeln!(f, "  lw ra, (t0)")?;
+                        for i in 1..layout.save {
+                            writeln!(f, "  addi t0, t0, -4")?;
+                            writeln!(f, "  lw s{}, (t0)", i - 1)?;
+                        }
+                    } else {
+                        writeln!(f, "  lw ra, {}(sp)", layout.total - 4)?;
+                        for i in 1..layout.save {
+                            writeln!(f, "  lw s{}, {}(sp)", i - 1, layout.total - 4 - 4 * i)?;
+                        }
                     }
                 }
                 if layout.total > 0 {

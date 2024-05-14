@@ -14,28 +14,28 @@ impl RiscvProgram {
 impl RiscvFunction {
     /// Clear instructions that essentially do nothing.
     fn clear_useless(&mut self) {
-        use RiscvInstruction::{Comment, Nop, Xori};
+        use RiscvInstruction::*;
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
-            let mut need_clean = false;
             for i in 0..num {
                 match block.instructions[i] {
+                    Comment(_) => {
+                        block.instructions[i] = Nop;
+                    }
                     Xori(d, s, 0) => {
                         if d == s {
                             block.instructions[i] = Nop;
-                            need_clean = true;
                         }
                     }
-                    Comment(_) => {
-                        block.instructions[i] = Nop;
-                        need_clean = true;
+                    Mv(d, s) => {
+                        if d == s {
+                            block.instructions[i] = Nop;
+                        }
                     }
                     _ => {}
                 }
             }
-            if need_clean {
-                block.clear_nop();
-            }
+            block.clear_nop();
         }
     }
 

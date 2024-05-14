@@ -606,20 +606,6 @@ fn build_exp(
 
                 let (left, bb) = build_exp(func, bb, left, symtab);
 
-                if let Some(left_value) = get_integer(func, left) {
-                    if left_value == 0 {
-                        return (zero, bb);
-                    } else {
-                        let (right, bb) = build_exp(func, bb, right, symtab);
-                        if let Some(right_value) = get_integer(func, right) {
-                            return (new_value!(func).integer((right_value != 0) as i32), bb);
-                        }
-                        let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-                        add_value(func, bb, right);
-                        return (right, bb);
-                    }
-                }
-
                 let result = new_value!(func).alloc(Type::get_i32());
                 add_value(func, bb, result);
                 let assign = new_value!(func).store(zero, result);
@@ -656,19 +642,6 @@ fn build_exp(
                 let one = new_value!(func).integer(1);
 
                 let (left, bb) = build_exp(func, bb, left, symtab);
-
-                if let Some(left_value) = get_integer(func, left) {
-                    if left_value != 0 {
-                        return (one, bb);
-                    }
-                    let (right, bb) = build_exp(func, bb, right, symtab);
-                    if let Some(right_value) = get_integer(func, right) {
-                        return (if right_value == 0 { zero } else { one }, bb);
-                    }
-                    let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-                    add_value(func, bb, right);
-                    return (right, bb);
-                }
 
                 let result = new_value!(func).alloc(Type::get_i32());
                 add_value(func, bb, result);

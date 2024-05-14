@@ -86,7 +86,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 
     let func_name = function_name(func_data).unwrap();
     let lifetime = LifeTime::new(func_data);
-    println!("{:#?}", lifetime);
+
     let allocator = Allocator::linear_scan_register_allocation(lifetime);
 
     let stack_layout = allocate_stack(func_data, &allocator);
