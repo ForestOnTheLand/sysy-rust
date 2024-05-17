@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::{fmt, str};
 
 /// RISCV registers, with [`Register::id`] in 0~31 (32 in total)
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Register {
     id: u8,
 }
@@ -95,14 +95,6 @@ impl fmt::Display for Register {
         write!(f, "{}", Register::NAME[self.id as usize])
     }
 }
-
-impl PartialEq for Register {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
-}
-
-impl Eq for Register {}
 
 #[derive(Debug)]
 pub struct RegGroup {

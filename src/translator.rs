@@ -153,7 +153,10 @@ fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> StackLayou
                 if call.args().len() > 8 {
                     args = max(args, call.args().len() - 8);
                 }
-                save = max(save, 1 + allocator.get_occupied_registers(inst).len());
+                save = max(
+                    save,
+                    1 + allocator.get_occupied_registers(inst, call.args()).len(),
+                );
             }
         }
     }
@@ -354,12 +357,12 @@ fn translate_instruction(
             insts.push(RiscvInstruction::Jump(jmp_tag));
         }
         ValueKind::Call(call) => {
-            let caller_saved = config.allocator.get_occupied_registers(value);
+            // Get currently occupied registers. Save them (a_) into s_ registers.
+            let caller_saved = config.allocator.get_occupied_registers(value, call.args());
             for (i, (reg, _)) in caller_saved.iter().enumerate() {
                 insts.push(RiscvInstruction::Mv(Register::S[i], *reg));
             }
-            insts.push(RiscvInstruction::Comment(format!("{caller_saved:?}")));
-            //
+            // Save arguments into registers (a_) or onto stack
             for (i, &arg) in call.args().iter().enumerate() {
                 let mut reg = prepare_value(arg, insts, config, None);
                 if let Some(index) = caller_saved.iter().position(|(r, _)| *r == reg) {
@@ -376,13 +379,16 @@ fn translate_instruction(
                 }
                 config.table.reset(reg);
             }
+            // Call the function
             let callee = call.callee();
             let callee_data = config.program.func(callee);
             let func_name = function_name(callee_data).unwrap();
             insts.push(RiscvInstruction::Call(func_name));
+            // Save the return value, if any
             if !config.func_data.dfg().value(value).ty().is_unit() {
                 save_value(value, Register::A0, insts, config);
             }
+            // Restore caller saved registers
             for (i, (reg, need_load)) in caller_saved.iter().enumerate() {
                 if *need_load {
                     insts.push(RiscvInstruction::Mv(*reg, Register::S[i]));

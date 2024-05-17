@@ -28,23 +28,22 @@ impl RiscvFunction {
                             block.instructions[i] = Nop
                         }
                     }
+                    Xor(d, s, Register::X0) => {
+                        if d == s {
+                            block.instructions[i] = Nop
+                        }
+                    }
                     Mv(d, s) => {
                         if d == s {
                             block.instructions[i] = Nop
                         }
                     }
-                    Muli(dst, _, _) => {
-                        if dst == Register::X0 {
+                    Muli(Register::X0, _, _) => block.instructions[i] = Nop,
+                    Add(dst, a, Register::X0) => {
+                        if dst == a {
                             block.instructions[i] = Nop
-                        }
-                    }
-                    Add(dst, a, b) => {
-                        if b == Register::X0 {
-                            if dst == a {
-                                block.instructions[i] = Nop
-                            } else {
-                                block.instructions[i] = Mv(dst, a)
-                            }
+                        } else {
+                            block.instructions[i] = Mv(dst, a)
                         }
                     }
                     _ => {}

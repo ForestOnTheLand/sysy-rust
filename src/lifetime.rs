@@ -150,7 +150,7 @@ impl Allocator {
         }
     }
 
-    pub fn get_occupied_registers(&self, value: Value) -> Vec<(Register, bool)> {
+    pub fn get_occupied_registers(&self, value: Value, args: &[Value]) -> Vec<(Register, bool)> {
         let mut registers = Vec::new();
         let id = self.lifetime.index.get(&value).unwrap().clone();
         for inst in self.lifetime.insts.iter().cloned() {
@@ -159,6 +159,11 @@ impl Allocator {
             }
             if inst.end >= id {
                 if let Some(r) = self.allocation.get(&inst.value) {
+                    if let Some(i) = Register::A.iter().position(|reg| reg == r) {
+                        if i < args.len() && self.allocation.get(&args[i]) == Some(r) {
+                            continue;
+                        }
+                    }
                     registers.push((*r, inst.end > id));
                 }
             }
