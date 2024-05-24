@@ -55,10 +55,13 @@ impl LifeTime {
         }
         for (_, bb) in func.layout().bbs() {
             for (value, _) in bb.insts() {
-                if func.dfg().value(*value).ty().is_unit()
-                    || matches!(func.dfg().value(*value).kind(), ValueKind::Alloc(_))
-                {
+                if func.dfg().value(*value).ty().is_unit() {
                     continue;
+                }
+                if matches!(func.dfg().value(*value).kind(), ValueKind::Alloc(_)) {
+                    if func.dfg().value(*value).name().is_some() {
+                        continue;
+                    }
                 }
                 let mut l = u32::MAX;
                 let mut r = 0u32;

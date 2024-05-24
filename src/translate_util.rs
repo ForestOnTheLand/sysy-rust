@@ -149,8 +149,9 @@ impl RegGroup {
 pub enum AllocPos {
     #[allow(dead_code)]
     Reg(Register), // x = %reg
-    Stack(i32),        // x = offset(%sp)
-    StackPointer(i32), // x = %sp + offset = &offset(%sp)
+    RegPointer(Register), // x = &(%reg)
+    Stack(i32),           // x = offset(%sp)
+    StackPointer(i32),    // x = %sp + offset = &offset(%sp)
 }
 
 /// Record the position (register or stack) of all variables in a function.
@@ -172,6 +173,10 @@ impl AllocTable {
     #[allow(dead_code)]
     pub fn store_register(&mut self, value: Value, reg: Register) {
         self.data.insert(value, AllocPos::Reg(reg));
+    }
+
+    pub fn store_register_pointer(&mut self, value: Value, reg: Register) {
+        self.data.insert(value, AllocPos::RegPointer(reg));
     }
 
     pub fn store_stack(&mut self, value: Value, offset: i32) {

@@ -205,12 +205,16 @@ fn translate_instruction(
                 TypeKind::Pointer(value) => value.size(),
                 _ => unreachable!(),
             };
-            insts.push(RiscvInstruction::Comment(format!(
-                "alloc at {}(sp), size {}",
-                *config.stack_pos, size
-            )));
-            config.symbol.store_stack_pointer(value, *config.stack_pos);
-            *config.stack_pos += size as i32;
+            if let Some(reg) = config.allocator.allocation.get(&value) {
+                config.symbol.store_register_pointer(value, *reg);
+            } else {
+                insts.push(RiscvInstruction::Comment(format!(
+                    "alloc at {}(sp), size {}",
+                    *config.stack_pos, size
+                )));
+                config.symbol.store_stack_pointer(value, *config.stack_pos);
+                *config.stack_pos += size as i32;
+            }
         }
         ValueKind::GlobalAlloc(_) => unreachable!(),
         ValueKind::Load(load) => {
@@ -223,8 +227,8 @@ fn translate_instruction(
                 insts.push(RiscvInstruction::Lw(reg, 0, reg));
                 reg
             } else {
-                let reg = prepare_value(load.src(), insts, config, expected);
-                insts.push(RiscvInstruction::Lw(reg, 0, reg));
+                let reg = expected.unwrap_or_else(|| config.table.get_vaccant());
+                load_into(load.src(), insts, config, reg);
                 reg
             };
 
@@ -252,9 +256,7 @@ fn translate_instruction(
                     insts.push(RiscvInstruction::Sw(reg, 0, tmp));
                     config.table.reset(tmp);
                 } else {
-                    let pos = prepare_value(store.dest(), insts, config, None);
-                    insts.push(RiscvInstruction::Sw(reg, 0, pos));
-                    config.table.reset(pos);
+                    store_into(store.dest(), insts, config, reg);
                 }
                 config.table.reset(reg);
             }
@@ -417,6 +419,7 @@ fn prepare_value(
 ) -> Register {
     match config.symbol.get(&value) {
         Some(AllocPos::Reg(reg)) => *reg,
+        Some(AllocPos::RegPointer(_)) => unreachable!("Register is not addressible"),
         Some(AllocPos::Stack(pos)) => {
             let pos = *pos;
             let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
@@ -452,6 +455,46 @@ fn prepare_value(
             e => unimplemented!("{:#?}", e),
         },
     }
+}
+
+fn load_into(
+    value: Value,
+    insts: &mut Vec<RiscvInstruction>,
+    config: &mut TranslateConfig,
+    dst: Register,
+) {
+    match config.symbol.get(&value) {
+        Some(AllocPos::Reg(reg)) => insts.push(RiscvInstruction::Lw(dst, 0, *reg)),
+        Some(AllocPos::RegPointer(reg)) => insts.push(RiscvInstruction::Mv(dst, *reg)),
+        Some(AllocPos::Stack(pos)) => {
+            insts.push(RiscvInstruction::Lw(Register::T0, *pos, Register::SP));
+            insts.push(RiscvInstruction::Lw(dst, 0, Register::T0));
+        }
+        Some(AllocPos::StackPointer(pos)) => {
+            insts.push(RiscvInstruction::Lw(dst, *pos, Register::SP))
+        }
+        None => unreachable!("can not load into a Right Value"),
+    };
+}
+
+fn store_into(
+    value: Value,
+    insts: &mut Vec<RiscvInstruction>,
+    config: &mut TranslateConfig,
+    src: Register,
+) {
+    match config.symbol.get(&value) {
+        Some(AllocPos::Reg(reg)) => insts.push(RiscvInstruction::Sw(src, 0, *reg)),
+        Some(AllocPos::RegPointer(reg)) => insts.push(RiscvInstruction::Mv(*reg, src)),
+        Some(AllocPos::Stack(pos)) => {
+            insts.push(RiscvInstruction::Lw(Register::T0, *pos, Register::SP));
+            insts.push(RiscvInstruction::Sw(src, 0, Register::T0));
+        }
+        Some(AllocPos::StackPointer(pos)) => {
+            insts.push(RiscvInstruction::Sw(src, *pos, Register::SP))
+        }
+        None => unreachable!("can not load into a Right Value"),
+    };
 }
 
 fn save_value(
