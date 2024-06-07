@@ -115,6 +115,7 @@ impl Allocator {
         for inst in lifetime.insts.iter().cloned() {
             allocator.expire_old_intervals(inst);
             if allocator.active.len() == allocator.regs.num() {
+                println!("Warning: variable spilled on stack");
                 allocator.spill_at_interval(inst);
             } else {
                 let reg = allocator.regs.get_vaccant();

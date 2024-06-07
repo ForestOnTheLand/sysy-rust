@@ -72,12 +72,14 @@ impl RegGroup {
             state: [false; 32],
         }
     }
+
     pub fn new_store() -> Self {
         Self {
             list: &Self::STORE,
             state: [false; 32],
         }
     }
+
     pub fn num(&self) -> usize {
         self.list.len()
     }
