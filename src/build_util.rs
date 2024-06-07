@@ -104,14 +104,6 @@ impl SymbolTable {
         }
     }
 
-    pub fn layer_id(&self) -> usize {
-        if self.data.len() > 3 {
-            self.data.len() - 3
-        } else {
-            0
-        }
-    }
-
     pub fn enter_loop(&mut self, entry: BasicBlock, end: BasicBlock) {
         self.loops.push((entry, end));
     }

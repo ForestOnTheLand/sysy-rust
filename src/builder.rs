@@ -305,7 +305,7 @@ fn build_var_def(
 
     let var = new_value!(func).alloc(get_array_type(&shape));
     func.dfg_mut()
-        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.layer_id())));
+        .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.get_id())));
     add_value(func, bb, var);
     let ty = func.dfg().value(var).ty().clone();
     symtab.insert_var(def.ident.clone(), var, ty);
@@ -354,10 +354,8 @@ fn build_const_def(
         add_value(func, bb, array);
         let store = new_value!(func).store(value, array);
         add_value(func, bb, store);
-        func.dfg_mut().set_value_name(
-            array,
-            Some(format!("@{}_{}", &def.ident, symtab.layer_id())),
-        );
+        func.dfg_mut()
+            .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.get_id())));
         let ty = func.dfg().value(array).ty().clone();
         symtab.insert_var(def.ident.clone(), array, ty);
     }

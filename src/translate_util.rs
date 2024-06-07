@@ -9,70 +9,30 @@ use std::{fmt, str};
 
 /// RISCV registers, with [`Register::id`] in 0~31 (32 in total)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Register {
-    id: u8,
+pub struct Register(u8);
+
+macro_rules! register_define {
+    ($($name:ident $value:literal),*) => {
+        $(pub const $name: Register = Register($value);)*
+    };
+}
+macro_rules! register_list {
+    ($($name:ident),*) => {
+        [$(Register::$name),*]
+    };
 }
 
 #[allow(dead_code)]
 impl Register {
-    pub const X0: Register = Register { id: 0 };
-    pub const RA: Register = Register { id: 1 };
-    pub const SP: Register = Register { id: 2 };
-    pub const GP: Register = Register { id: 3 };
-    pub const TP: Register = Register { id: 4 };
-    pub const T0: Register = Register { id: 5 };
-    pub const T1: Register = Register { id: 6 };
-    pub const T2: Register = Register { id: 7 };
-    pub const S0: Register = Register { id: 8 };
-    pub const S1: Register = Register { id: 9 };
-    pub const A0: Register = Register { id: 10 };
-    pub const A1: Register = Register { id: 11 };
-    pub const A2: Register = Register { id: 12 };
-    pub const A3: Register = Register { id: 13 };
-    pub const A4: Register = Register { id: 14 };
-    pub const A5: Register = Register { id: 15 };
-    pub const A6: Register = Register { id: 16 };
-    pub const A7: Register = Register { id: 17 };
-    pub const S2: Register = Register { id: 18 };
-    pub const S3: Register = Register { id: 19 };
-    pub const S4: Register = Register { id: 20 };
-    pub const S5: Register = Register { id: 21 };
-    pub const S6: Register = Register { id: 22 };
-    pub const S7: Register = Register { id: 23 };
-    pub const S8: Register = Register { id: 24 };
-    pub const S9: Register = Register { id: 25 };
-    pub const S10: Register = Register { id: 26 };
-    pub const S11: Register = Register { id: 27 };
-    pub const T3: Register = Register { id: 28 };
-    pub const T4: Register = Register { id: 29 };
-    pub const T5: Register = Register { id: 30 };
-    pub const T6: Register = Register { id: 31 };
+    register_define! {
+        X0 0, RA 1, SP 2, GP 3, TP 4, T0 5, T1 6, T2 7, S0 8, S1 9, A0 10,
+        A1 11, A2 12, A3 13, A4 14, A5 15, A6 16, A7 17, S2 18, S3 19, S4 20,
+        S5 21, S6 22, S7 23, S8 24, S9 25, S10 26, S11 27, T3 28, T4 29, T5 30, T6 31
+    }
 
-    pub const A: [Register; 8] = [
-        Register::A0,
-        Register::A1,
-        Register::A2,
-        Register::A3,
-        Register::A4,
-        Register::A5,
-        Register::A6,
-        Register::A7,
-    ];
-
-    pub const S: [Register; 12] = [
-        Register::S0,
-        Register::S1,
-        Register::S2,
-        Register::S3,
-        Register::S4,
-        Register::S5,
-        Register::S6,
-        Register::S7,
-        Register::S8,
-        Register::S9,
-        Register::S10,
-        Register::S11,
-    ];
+    pub const A: [Register; 8] = register_list!(A0, A1, A2, A3, A4, A5, A6, A7);
+    pub const S: [Register; 12] = register_list!(S0, S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11);
+    pub const T: [Register; 7] = register_list!(T0, T1, T2, T3, T4, T5, T6);
 
     /// names of registers, see <https://pku-minic.github.io/online-doc/#/misc-app-ref/riscv-insts>
     /// for more detailed information
@@ -86,25 +46,25 @@ impl Register {
 impl Register {
     #[allow(dead_code)]
     pub fn name(&self) -> &str {
-        Register::NAME[self.id as usize]
+        Register::NAME[self.0 as usize]
     }
 }
 
 impl fmt::Display for Register {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", Register::NAME[self.id as usize])
+        write!(f, "{}", Register::NAME[self.0 as usize])
     }
 }
 
 #[derive(Debug)]
 pub struct RegGroup {
-    list: &'static [u8],
+    list: &'static [Register],
     state: [bool; 32],
 }
 
 impl RegGroup {
-    const TEMP: [u8; 10] = [6, 7, 28, 29, 30, 31, 24, 25, 26, 27];
-    const STORE: [u8; 8] = [10, 11, 12, 13, 14, 15, 16, 17];
+    const TEMP: [Register; 4] = register_list!(T1, T2, T3, T4);
+    const STORE: [Register; 8] = register_list!(A0, A1, A2, A3, A4, A5, A6, A7);
 
     pub fn new_temp() -> Self {
         Self {
@@ -123,21 +83,21 @@ impl RegGroup {
     }
 
     pub fn get_vaccant(&mut self) -> Register {
-        for id in self.list.iter().cloned() {
-            if !self.state[id as usize] {
-                self.state[id as usize] = true;
-                return Register { id };
+        for reg in self.list.iter().cloned() {
+            if !self.state[reg.0 as usize] {
+                self.state[reg.0 as usize] = true;
+                return reg;
             }
         }
         panic!("no available registers now");
     }
 
     pub fn reset(&mut self, reg: Register) {
-        if !self.list.contains(&reg.id) {
+        if !self.list.contains(&reg) {
             return;
         }
-        if self.state[reg.id as usize] {
-            self.state[reg.id as usize] = false;
+        if self.state[reg.0 as usize] {
+            self.state[reg.0 as usize] = false;
         } else {
             panic!("register {reg} is not being occupied now");
         }
@@ -147,8 +107,7 @@ impl RegGroup {
 /// Record the position (register or stack) of a single variable.
 #[derive(PartialEq)]
 pub enum AllocPos {
-    #[allow(dead_code)]
-    Reg(Register), // x = %reg
+    Reg(Register),        // x = %reg
     RegPointer(Register), // x = &(%reg)
     Stack(i32),           // x = offset(%sp)
     StackPointer(i32),    // x = %sp + offset = &offset(%sp)
@@ -170,7 +129,6 @@ impl AllocTable {
         self.data.get(value)
     }
 
-    #[allow(dead_code)]
     pub fn store_register(&mut self, value: Value, reg: Register) {
         self.data.insert(value, AllocPos::Reg(reg));
     }

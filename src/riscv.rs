@@ -34,9 +34,9 @@ pub struct RiscvBlock {
 #[derive(Debug)]
 #[allow(dead_code)]
 pub enum RiscvInstruction {
+    Nop,
     // Comment
     Comment(String),
-    Nop,
     // Control flow
     Beqz(Register, String),
     Bnez(Register, String),

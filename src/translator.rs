@@ -2,8 +2,7 @@
 //! Instead of implementing a `trait` as is described in the writeup,
 //! the core of the file is implemented in the function [`translate_program`].
 
-use crate::lifetime::Allocator;
-use crate::lifetime::LifeTime;
+use crate::lifetime::{Allocator, LifeTime};
 use crate::riscv::*;
 use crate::translate_util::*;
 use koopa::ir::{
@@ -86,9 +85,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 
     let func_name = function_name(func_data).unwrap();
     let lifetime = LifeTime::new(func_data);
-
     let allocator = Allocator::linear_scan_register_allocation(lifetime);
-
     let stack_layout = allocate_stack(func_data, &allocator);
 
     let mut function = RiscvFunction {
@@ -194,12 +191,6 @@ fn translate_instruction(
         None => insts.push(RiscvInstruction::Comment(format!("value on stack"))),
     }
     match config.func_data.dfg().value(value).kind() {
-        ValueKind::Integer(_) => unreachable!(),
-        ValueKind::ZeroInit(_) => unreachable!(),
-        ValueKind::Undef(_) => unreachable!(),
-        ValueKind::Aggregate(_) => unreachable!(),
-        ValueKind::FuncArgRef(_) => unreachable!(),
-        ValueKind::BlockArgRef(_) => unreachable!(),
         ValueKind::Alloc(_) => {
             let size = match config.func_data.dfg().value(value).ty().kind() {
                 TypeKind::Pointer(value) => value.size(),
@@ -216,7 +207,7 @@ fn translate_instruction(
                 *config.stack_pos += size as i32;
             }
         }
-        ValueKind::GlobalAlloc(_) => unreachable!(),
+
         ValueKind::Load(load) => {
             let expected = config.allocator.allocation.get(&value).cloned();
             let reg = if load.src().is_global() {
@@ -231,9 +222,9 @@ fn translate_instruction(
                 load_into(load.src(), insts, config, reg);
                 reg
             };
-
             save_value(value, reg, insts, config);
         }
+
         ValueKind::Store(store) => match config.func_data.dfg().value(store.value()).kind() {
             ValueKind::Aggregate(list) => {
                 assert!(!store.dest().is_global());
@@ -261,6 +252,7 @@ fn translate_instruction(
                 config.table.reset(reg);
             }
         },
+
         ValueKind::GetPtr(get) => {
             assert!(!get.src().is_global());
             let reg = prepare_value(get.src(), insts, config, None);
@@ -274,6 +266,7 @@ fn translate_instruction(
             config.table.reset(index);
             save_value(value, reg, insts, config);
         }
+
         ValueKind::GetElemPtr(get) => {
             let (reg, s) = if get.src().is_global() {
                 let tmp = config.table.get_vaccant();
@@ -342,22 +335,23 @@ fn translate_instruction(
                 }
                 _ => unimplemented!(),
             };
-
             save_value(value, res, insts, config);
         }
+
         ValueKind::Branch(branch) => {
             let cond = prepare_value(branch.cond(), insts, config, None);
             let then_tag = block_name(config.func_data, branch.true_bb()).unwrap();
             let else_tag = block_name(config.func_data, branch.false_bb()).unwrap();
-
             insts.push(RiscvInstruction::Beqz(cond, else_tag));
             config.table.reset(cond);
             insts.push(RiscvInstruction::Jump(then_tag));
         }
+
         ValueKind::Jump(jump) => {
             let jmp_tag = block_name(config.func_data, jump.target()).unwrap();
             insts.push(RiscvInstruction::Jump(jmp_tag));
         }
+
         ValueKind::Call(call) => {
             // Get currently occupied registers. Save them (a_) into s_ registers.
             let caller_saved = config.allocator.get_occupied_registers(value, call.args());
@@ -397,6 +391,7 @@ fn translate_instruction(
                 }
             }
         }
+
         ValueKind::Return(ret) => {
             match ret.value() {
                 Some(val) => {
@@ -408,6 +403,8 @@ fn translate_instruction(
             };
             insts.push(RiscvInstruction::Ret(config.stack_layout.clone()));
         }
+
+        _ => unreachable!(),
     }
 }
 
