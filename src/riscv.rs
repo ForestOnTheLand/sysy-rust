@@ -179,7 +179,7 @@ impl std::fmt::Display for RiscvInstruction {
                 if *i < 2048 && *i >= -2048 {
                     writeln!(f, "  lw {d}, {i}({b})")
                 } else {
-                    writeln!(f, "  li {d}, {i}\n  add {d}, {d}, {b}\n  lw {d}, ({d})")
+                    writeln!(f, "  li t0, {i}\n  add t0, t0, {b}\n  lw {d}, (t0)")
                 }
             }
             RiscvInstruction::Sw(d, i, b) => {
@@ -194,7 +194,7 @@ impl std::fmt::Display for RiscvInstruction {
                 if *i < 2048 && *i >= -2048 {
                     writeln!(f, "  addi {d}, {a}, {i}")
                 } else {
-                    writeln!(f, "  li {d}, {i}\n  add {d}, {a}, {d}")
+                    writeln!(f, "  li t0, {i}\n  add {d}, {a}, t0")
                 }
             }
             RiscvInstruction::Sub(d, a, b) => writeln!(f, "  sub {d}, {a}, {b}"),

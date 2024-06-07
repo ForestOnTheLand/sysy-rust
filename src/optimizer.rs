@@ -7,6 +7,7 @@ impl RiscvProgram {
     pub fn optimize(&mut self) {
         for func in self.functions.iter_mut() {
             func.clear_useless();
+            func.fold_constant();
             func.fold_addi();
             func.eliminate_load();
             func.eliminate_jump();
@@ -90,6 +91,51 @@ impl RiscvFunction {
             if need_clean {
                 block.clear_nop();
             }
+        }
+    }
+
+    fn fold_constant(&mut self) {
+        use RiscvInstruction::{Add, Addi, Li, Mul, Muli, Mv, Nop, Sub};
+        for block in self.blocks.iter_mut() {
+            let num = block.instructions.len();
+            for i in 0..(num - 1) {
+                if let Li(reg, value) = block.instructions[i] {
+                    match block.instructions[i + 1] {
+                        Add(d, a, b) => {
+                            if b == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Addi(d, a, value);
+                            }
+                        }
+                        Sub(d, a, b) => {
+                            if b == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Addi(d, a, -value);
+                            }
+                        }
+                        Mul(d, a, b) => {
+                            if b == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Muli(d, a, value);
+                            }
+                        }
+                        Muli(d, a, b) => {
+                            if a == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Li(d, value * b);
+                            }
+                        }
+                        Mv(d, s) => {
+                            if s == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Li(d, value);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            block.clear_nop();
         }
     }
 
