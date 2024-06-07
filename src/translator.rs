@@ -317,10 +317,10 @@ fn translate_instruction(
                 BinaryOp::Or => insts.push(RiscvInstruction::Or(res, left, right)),
                 BinaryOp::Lt => insts.push(RiscvInstruction::Slt(res, left, right)),
                 BinaryOp::Le => {
-                    insts.push(RiscvInstruction::Sgt(res, left, right));
+                    insts.push(RiscvInstruction::Slt(res, right, left));
                     insts.push(RiscvInstruction::Seqz(res, res));
                 }
-                BinaryOp::Gt => insts.push(RiscvInstruction::Sgt(res, left, right)),
+                BinaryOp::Gt => insts.push(RiscvInstruction::Slt(res, right, left)),
                 BinaryOp::Ge => {
                     insts.push(RiscvInstruction::Slt(res, left, right));
                     insts.push(RiscvInstruction::Seqz(res, res));

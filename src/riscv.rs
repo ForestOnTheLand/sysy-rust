@@ -51,7 +51,7 @@ pub enum RiscvInstruction {
     Addi(Register, Register, i32),
     Sub(Register, Register, Register),
     Slt(Register, Register, Register),
-    Sgt(Register, Register, Register),
+    Slti(Register, Register, i32),
     Seqz(Register, Register),
     Snez(Register, Register),
     Xor(Register, Register, Register),
@@ -199,7 +199,13 @@ impl std::fmt::Display for RiscvInstruction {
             }
             RiscvInstruction::Sub(d, a, b) => writeln!(f, "  sub {d}, {a}, {b}"),
             RiscvInstruction::Slt(d, a, b) => writeln!(f, "  slt {d}, {a}, {b}"),
-            RiscvInstruction::Sgt(d, a, b) => writeln!(f, "  sgt {d}, {a}, {b}"),
+            RiscvInstruction::Slti(d, a, i) => {
+                if *i < 2048 && *i >= -2048 {
+                    writeln!(f, "  slti {d}, {a}, {i}")
+                } else {
+                    writeln!(f, "  li t0, {i}\n  slt {d}, {a}, t0")
+                }
+            }
             RiscvInstruction::Seqz(d, s) => writeln!(f, "  seqz {d}, {s}"),
             RiscvInstruction::Snez(d, s) => writeln!(f, "  snez {d}, {s}"),
             RiscvInstruction::Xor(d, a, b) => writeln!(f, "  xor {d}, {a}, {b}"),

@@ -95,7 +95,7 @@ impl RiscvFunction {
     }
 
     fn fold_constant(&mut self) {
-        use RiscvInstruction::{Add, Addi, Li, Mul, Muli, Mv, Nop, Sub};
+        use RiscvInstruction::*;
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             for i in 0..(num - 1) {
@@ -129,6 +129,18 @@ impl RiscvFunction {
                             if s == reg {
                                 block.instructions[i] = Nop;
                                 block.instructions[i + 1] = Li(d, value);
+                            }
+                        }
+                        Slt(d, a, b) => {
+                            if b == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Slti(d, a, value);
+                            }
+                        }
+                        Xor(d, a, b) => {
+                            if b == reg {
+                                block.instructions[i] = Nop;
+                                block.instructions[i + 1] = Xori(d, a, value);
                             }
                         }
                         _ => {}
