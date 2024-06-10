@@ -116,7 +116,7 @@ impl std::fmt::Display for RiscvProgram {
         }
         writeln!(f, "\n  .text")?;
         for func in self.functions.iter() {
-            write!(f, "{}", func)?;
+            writeln!(f, "{}", func)?;
         }
         Ok(())
     }

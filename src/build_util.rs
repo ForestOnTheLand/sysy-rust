@@ -104,8 +104,8 @@ impl SymbolTable {
         }
     }
 
-    pub fn enter_loop(&mut self, entry: BasicBlock, end: BasicBlock) {
-        self.loops.push((entry, end));
+    pub fn enter_loop(&mut self, entry: BasicBlock, exit: BasicBlock) {
+        self.loops.push((entry, exit));
     }
 
     pub fn quit_loop(&mut self) {

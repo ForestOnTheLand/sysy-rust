@@ -68,6 +68,9 @@ impl RiscvFunction {
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             let mut need_clean = false;
+            if num == 0 {
+                break;
+            }
             for i in 0..(num - 1) {
                 match block.instructions[i] {
                     Bexpi(Bop::Add, address, base, offset) => match block.instructions[i + 1] {
@@ -100,6 +103,9 @@ impl RiscvFunction {
         use RiscvInstruction::*;
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
+            if num == 0 {
+                break;
+            }
             for i in 0..(num - 1) {
                 if let Li(reg, value) = block.instructions[i] {
                     match block.instructions[i + 1] {
@@ -139,6 +145,9 @@ impl RiscvFunction {
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             let mut need_clean = false;
+            if num == 0 {
+                break;
+            }
             for i in 0..(num - 1) {
                 if let Sw(reg_1, offset_1, addr_1) = block.instructions[i] {
                     if let Lw(reg_2, offset_2, addr_2) = block.instructions[i + 1] {

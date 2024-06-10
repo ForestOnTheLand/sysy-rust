@@ -3,6 +3,7 @@
 use crate::ast::*;
 use crate::build_util::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
+use koopa::front::ast::Branch;
 use koopa::ir::{builder_traits::*, TypeKind, ValueKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
@@ -458,60 +459,45 @@ fn build_stmt(
         }
         Stmt::Condition(cond, true_branch, false_branch) => {
             let id = symtab.get_id();
-            let (cond, bb) = build_exp(func, bb, cond, symtab);
+            let then_bb = new_bb(func, format!("%koopa_builtin_then_{id}"));
             let end_bb = new_bb(func, format!("%koopa_builtin_end_if_{id}"));
-
-            let true_bb = new_bb(func, format!("%koopa_builtin_then_{id}"));
-            add_bb(func, true_bb);
-            let true_end = build_stmt(func, true_bb, true_branch, symtab);
-            let true_jmp = new_value!(func).jump(end_bb);
-            add_value(func, true_end, true_jmp);
-
-            let else_bb = {
-                if let Some(false_branch) = false_branch {
-                    let false_bb = new_bb(func, format!("%koopa_builtin_else_{id}"));
-                    add_bb(func, false_bb);
-                    let false_end = build_stmt(func, false_bb, false_branch, symtab);
-                    add_bb(func, end_bb);
-                    let false_jmp = new_value!(func).jump(end_bb);
-                    add_value(func, false_end, false_jmp);
-                    false_bb
-                } else {
-                    add_bb(func, end_bb);
-                    end_bb
-                }
+            let else_bb = if let Some(false_branch) = false_branch {
+                new_bb(func, format!("%koopa_builtin_else_{id}"))
+            } else {
+                end_bb
             };
-            let branch = new_value!(func).branch(cond, true_bb, else_bb);
-            add_value(func, bb, branch);
+            build_logical_exp(func, bb, then_bb, else_bb, cond, symtab);
+            add_bb(func, then_bb);
+            let end_then = build_stmt(func, then_bb, true_branch, symtab);
+            let jmp = new_value!(func).jump(end_bb);
+            add_value(func, end_then, jmp);
+            if let Some(false_branch) = false_branch {
+                add_bb(func, else_bb);
+                let end_else = build_stmt(func, else_bb, false_branch, symtab);
+                let jmp = new_value!(func).jump(end_bb);
+                add_value(func, end_else, jmp);
+            }
+            add_bb(func, end_bb);
             end_bb
         }
 
         Stmt::While(exp, stmt) => {
             let id = symtab.get_id();
             let entry = new_bb(func, format!("%koopa_builtin_while_entry_{id}"));
+            let exit = new_bb(func, format!("%koopa_builtin_while_end_{id}"));
+            let body = new_bb(func, format!("%koopa_builtin_while_body_{id}"));
+            symtab.enter_loop(entry, exit);
             add_bb(func, entry);
-            let end = new_bb(func, format!("%koopa_builtin_while_end_{id}"));
-
-            symtab.enter_loop(entry, end);
-
             let enter = new_value!(func).jump(entry);
             add_value(func, bb, enter);
-            let (cond, end_entry) = build_exp(func, entry, exp, symtab);
-
-            let body = new_bb(func, format!("%koopa_builtin_while_body_{id}"));
+            build_logical_exp(func, entry, body, exit, exp, symtab);
             add_bb(func, body);
             let end_body = build_stmt(func, body, stmt, symtab);
-            let jump = new_value!(func).jump(entry);
-            add_value(func, end_body, jump);
-
-            add_bb(func, end);
-
-            let branch = new_value!(func).branch(cond, body, end);
-            add_value(func, end_entry, branch);
-
+            let enter = new_value!(func).jump(entry);
+            add_value(func, end_body, enter);
+            add_bb(func, exit);
             symtab.quit_loop();
-
-            end
+            exit
         }
 
         Stmt::Break => {
@@ -689,6 +675,49 @@ fn build_exp(
                 (value, bb)
             }
         },
+    }
+}
+
+fn build_logical_exp(
+    func: &mut FunctionData,
+    bb: BasicBlock,
+    true_bb: BasicBlock,
+    false_bb: BasicBlock,
+    exp: &Exp,
+    symtab: &SymbolTable,
+) {
+    match exp {
+        // Build a single number
+        Exp::Number(num) => {
+            let jmp = new_value!(func).jump(if *num != 0 { true_bb } else { false_bb });
+            add_value(func, bb, jmp);
+        }
+        // Build unary expression
+        Exp::Unary(op, exp) => {
+            if matches!(op, UnaryOperator::Not) {
+                build_logical_exp(func, bb, false_bb, true_bb, exp, symtab)
+            } else {
+                build_logical_exp(func, bb, true_bb, false_bb, exp, symtab)
+            }
+        }
+        // Build a binary expression
+        Exp::Binary(left, BinaryOperator::And, right) => {
+            let temp_bb = new_bb(func, format!("%koopa_builtin_and_{}", symtab.get_id()));
+            build_logical_exp(func, bb, temp_bb, false_bb, left, symtab);
+            add_bb(func, temp_bb);
+            build_logical_exp(func, temp_bb, true_bb, false_bb, right, symtab);
+        }
+        Exp::Binary(left, BinaryOperator::Or, right) => {
+            let temp_bb = new_bb(func, format!("%koopa_builtin_or_{}", symtab.get_id()));
+            build_logical_exp(func, bb, true_bb, temp_bb, left, symtab);
+            add_bb(func, temp_bb);
+            build_logical_exp(func, temp_bb, true_bb, false_bb, right, symtab);
+        }
+        _ => {
+            let (value, bb) = build_exp(func, bb, exp, symtab);
+            let branch = new_value!(func).branch(value, true_bb, false_bb);
+            add_value(func, bb, branch);
+        }
     }
 }
 
