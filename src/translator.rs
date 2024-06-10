@@ -295,9 +295,16 @@ fn translate_instruction(
             let expected = config.allocator.allocation.get(&value).cloned();
             let index = prepare_value(get.index(), insts, config, expected);
             insts.push(RiscvInstruction::Bexpi(Bop::Mul, index, index, s as i32));
-            insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
-            config.table.reset(index);
-            save_value(value, reg, insts, config);
+            if let Some(dst) = expected {
+                insts.push(RiscvInstruction::Bexp(Bop::Add, dst, reg, index));
+                config.table.reset(reg);
+                config.table.reset(index);
+                save_value(value, dst, insts, config);
+            } else {
+                insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
+                config.table.reset(index);
+                save_value(value, reg, insts, config);
+            }
         }
 
         ValueKind::Binary(bin) => {

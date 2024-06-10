@@ -219,6 +219,8 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Bexpi(op, dst, src, int) => {
                 if (-2048..2048).contains(int) && op.combinable() {
                     writeln!(f, "  {}i {dst}, {src}, {int}", op.name())
+                } else if matches!(op, Bop::Mul) && int_log2(int).is_some() {
+                    writeln!(f, "  slli {dst}, {src}, {}", int_log2(int).unwrap())
                 } else {
                     writeln!(f, "  li t0, {int}\n  {} {dst}, {src}, t0", op.name())
                 }
@@ -229,5 +231,13 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::La(d, s) => writeln!(f, "  la {d}, {s}"),
             RiscvInstruction::Mv(d, s) => writeln!(f, "  mv {d}, {s}"),
         }
+    }
+}
+
+fn int_log2(i: &i32) -> Option<u32> {
+    if *i & (*i - 1) == 0 {
+        i.checked_ilog2()
+    } else {
+        None
     }
 }

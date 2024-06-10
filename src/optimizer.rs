@@ -70,17 +70,17 @@ impl RiscvFunction {
             for i in 0..(num - 1) {
                 match block.instructions[i] {
                     Bexpi(Bop::Add, address, base, offset) => match block.instructions[i + 1] {
-                        Lw(dst, 0, addr) => {
+                        Lw(dst, int, addr) => {
                             if addr == address {
                                 block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Lw(dst, offset, base);
+                                block.instructions[i + 1] = Lw(dst, offset + int, base);
                                 need_clean = true;
                             }
                         }
-                        Sw(dst, 0, addr) => {
+                        Sw(dst, int, addr) => {
                             if addr == address {
                                 block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Sw(dst, offset, base);
+                                block.instructions[i + 1] = Sw(dst, offset + int, base);
                                 need_clean = true;
                             }
                         }
