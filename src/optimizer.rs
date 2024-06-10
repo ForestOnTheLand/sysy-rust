@@ -9,6 +9,7 @@ impl RiscvProgram {
             func.clear_useless();
             func.fold_constant();
             func.fold_addi();
+            func.fold_addi();
             func.eliminate_load();
             func.eliminate_jump();
         }
