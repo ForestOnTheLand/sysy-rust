@@ -31,8 +31,49 @@ pub struct RiscvBlock {
     pub instructions: Vec<RiscvInstruction>,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum Bop {
+    Add,
+    Sub,
+    Slt,
+    Xor,
+    Or,
+    And,
+    Sll,
+    Srl,
+    Sra,
+    Mul,
+    Div,
+    Rem,
+}
+
+impl Bop {
+    fn name(&self) -> &'static str {
+        match self {
+            Bop::Add => "add",
+            Bop::Sub => "sub",
+            Bop::Slt => "slt",
+            Bop::Xor => "xor",
+            Bop::Or => "or",
+            Bop::And => "and",
+            Bop::Sll => "sll",
+            Bop::Srl => "srl",
+            Bop::Sra => "sra",
+            Bop::Mul => "mul",
+            Bop::Div => "div",
+            Bop::Rem => "rem",
+        }
+    }
+
+    fn combinable(&self) -> bool {
+        matches!(
+            self,
+            Bop::Add | Bop::Slt | Bop::Or | Bop::And | Bop::Sll | Bop::Srl | Bop::Sra | Bop::Xor
+        )
+    }
+}
+
 #[derive(Debug)]
-#[allow(dead_code)]
 pub enum RiscvInstruction {
     Nop,
     // Comment
@@ -46,27 +87,12 @@ pub enum RiscvInstruction {
     // Memory
     Lw(Register, i32, Register),
     Sw(Register, i32, Register),
-    // Calculate
-    Add(Register, Register, Register),
-    Addi(Register, Register, i32),
-    Sub(Register, Register, Register),
-    Slt(Register, Register, Register),
-    Slti(Register, Register, i32),
+    // Binary Expression
+    Bexp(Bop, Register, Register, Register),
+    Bexpi(Bop, Register, Register, i32),
+    // Unary Expression
     Seqz(Register, Register),
     Snez(Register, Register),
-    Xor(Register, Register, Register),
-    Xori(Register, Register, i32),
-    Or(Register, Register, Register),
-    Ori(Register, Register, i32),
-    And(Register, Register, Register),
-    Andi(Register, Register, i32),
-    Sll(Register, Register, Register),
-    Srl(Register, Register, Register),
-    Sra(Register, Register, Register),
-    Mul(Register, Register, Register),
-    Muli(Register, Register, i32),
-    Div(Register, Register, Register),
-    Rem(Register, Register, Register),
     // Load & Move
     Li(Register, i32),
     La(Register, String),
@@ -176,65 +202,32 @@ impl std::fmt::Display for RiscvInstruction {
                 writeln!(f, "  ret")
             }
             RiscvInstruction::Lw(d, i, b) => {
-                if *i < 2048 && *i >= -2048 {
+                if (-2048..2048).contains(i) {
                     writeln!(f, "  lw {d}, {i}({b})")
                 } else {
                     writeln!(f, "  li t0, {i}\n  add t0, t0, {b}\n  lw {d}, (t0)")
                 }
             }
             RiscvInstruction::Sw(d, i, b) => {
-                if *i < 2048 && *i >= -2048 {
+                if (-2048..2048).contains(i) {
                     writeln!(f, "  sw {d}, {i}({b})")
                 } else {
                     writeln!(f, "  li t0, {i}\n  add t0, t0, sp\n  sw {d}, (t0)")
                 }
             }
-            RiscvInstruction::Add(d, a, b) => writeln!(f, "  add {d}, {a}, {b}"),
-            RiscvInstruction::Addi(d, a, i) => {
-                if *i < 2048 && *i >= -2048 {
-                    writeln!(f, "  addi {d}, {a}, {i}")
+            RiscvInstruction::Bexp(op, dst, a, b) => writeln!(f, "  {} {dst}, {a}, {b}", op.name()),
+            RiscvInstruction::Bexpi(op, dst, src, int) => {
+                if (-2048..2048).contains(int) && op.combinable() {
+                    writeln!(f, "  {}i {dst}, {src}, {int}", op.name())
                 } else {
-                    writeln!(f, "  li t0, {i}\n  add {d}, {a}, t0")
-                }
-            }
-            RiscvInstruction::Sub(d, a, b) => writeln!(f, "  sub {d}, {a}, {b}"),
-            RiscvInstruction::Slt(d, a, b) => writeln!(f, "  slt {d}, {a}, {b}"),
-            RiscvInstruction::Slti(d, a, i) => {
-                if *i < 2048 && *i >= -2048 {
-                    writeln!(f, "  slti {d}, {a}, {i}")
-                } else {
-                    writeln!(f, "  li t0, {i}\n  slt {d}, {a}, t0")
+                    writeln!(f, "  li t0, {int}\n  {} {dst}, {src}, t0", op.name())
                 }
             }
             RiscvInstruction::Seqz(d, s) => writeln!(f, "  seqz {d}, {s}"),
             RiscvInstruction::Snez(d, s) => writeln!(f, "  snez {d}, {s}"),
-            RiscvInstruction::Xor(d, a, b) => writeln!(f, "  xor {d}, {a}, {b}"),
-            RiscvInstruction::Xori(d, a, b) => writeln!(f, "  xori {d}, {a}, {b}"),
-            RiscvInstruction::Or(d, a, b) => writeln!(f, "  or {d}, {a}, {b}"),
-            RiscvInstruction::Ori(d, a, b) => writeln!(f, "  ori {d}, {a}, {b}"),
-            RiscvInstruction::And(d, a, b) => writeln!(f, "  and {d}, {a}, {b}"),
-            RiscvInstruction::Andi(d, a, b) => writeln!(f, "  andi {d}, {a}, {b}"),
-            RiscvInstruction::Sll(d, a, b) => writeln!(f, "  sll {d}, {a}, {b}"),
-            RiscvInstruction::Srl(d, a, b) => writeln!(f, "  srl {d}, {a}, {b}"),
-            RiscvInstruction::Sra(d, a, b) => writeln!(f, "  sra {d}, {a}, {b}"),
-            RiscvInstruction::Mul(d, a, b) => writeln!(f, "  mul {d}, {a}, {b}"),
-            RiscvInstruction::Muli(d, a, i) => match int_log2(*i) {
-                Some(u) => writeln!(f, "  slli {d}, {a}, {u}"),
-                None => writeln!(f, "  li t0, {i}\n  mul {d}, {a}, t0"),
-            },
-            RiscvInstruction::Div(d, a, b) => writeln!(f, "  div {d}, {a}, {b}"),
-            RiscvInstruction::Rem(d, a, b) => writeln!(f, "  rem {d}, {a}, {b}"),
             RiscvInstruction::Li(d, s) => writeln!(f, "  li {d}, {s}"),
             RiscvInstruction::La(d, s) => writeln!(f, "  la {d}, {s}"),
             RiscvInstruction::Mv(d, s) => writeln!(f, "  mv {d}, {s}"),
         }
-    }
-}
-
-fn int_log2(i: i32) -> Option<u32> {
-    if i & (i - 1) == 0 {
-        i.checked_ilog2()
-    } else {
-        None
     }
 }

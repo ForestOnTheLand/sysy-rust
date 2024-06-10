@@ -261,8 +261,8 @@ fn translate_instruction(
                 _ => unreachable!(),
             };
             let index = prepare_value(get.index(), insts, config, None);
-            insts.push(RiscvInstruction::Muli(index, index, s as i32));
-            insts.push(RiscvInstruction::Add(reg, reg, index));
+            insts.push(RiscvInstruction::Bexpi(Bop::Mul, index, index, s as i32));
+            insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
             config.table.reset(index);
             save_value(value, reg, insts, config);
         }
@@ -292,9 +292,10 @@ fn translate_instruction(
                 };
                 (pos, s)
             };
-            let index = prepare_value(get.index(), insts, config, None);
-            insts.push(RiscvInstruction::Muli(index, index, s as i32));
-            insts.push(RiscvInstruction::Add(reg, reg, index));
+            let expected = config.allocator.allocation.get(&value).cloned();
+            let index = prepare_value(get.index(), insts, config, expected);
+            insts.push(RiscvInstruction::Bexpi(Bop::Mul, index, index, s as i32));
+            insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
             config.table.reset(index);
             save_value(value, reg, insts, config);
         }
@@ -308,29 +309,29 @@ fn translate_instruction(
             let res = expected.unwrap_or_else(|| config.table.get_vaccant());
 
             match bin.op() {
-                BinaryOp::Add => insts.push(RiscvInstruction::Add(res, left, right)),
-                BinaryOp::Sub => insts.push(RiscvInstruction::Sub(res, left, right)),
-                BinaryOp::Mul => insts.push(RiscvInstruction::Mul(res, left, right)),
-                BinaryOp::Div => insts.push(RiscvInstruction::Div(res, left, right)),
-                BinaryOp::Mod => insts.push(RiscvInstruction::Rem(res, left, right)),
-                BinaryOp::And => insts.push(RiscvInstruction::And(res, left, right)),
-                BinaryOp::Or => insts.push(RiscvInstruction::Or(res, left, right)),
-                BinaryOp::Lt => insts.push(RiscvInstruction::Slt(res, left, right)),
+                BinaryOp::Add => insts.push(RiscvInstruction::Bexp(Bop::Add, res, left, right)),
+                BinaryOp::Sub => insts.push(RiscvInstruction::Bexp(Bop::Sub, res, left, right)),
+                BinaryOp::Mul => insts.push(RiscvInstruction::Bexp(Bop::Mul, res, left, right)),
+                BinaryOp::Div => insts.push(RiscvInstruction::Bexp(Bop::Div, res, left, right)),
+                BinaryOp::Mod => insts.push(RiscvInstruction::Bexp(Bop::Rem, res, left, right)),
+                BinaryOp::And => insts.push(RiscvInstruction::Bexp(Bop::And, res, left, right)),
+                BinaryOp::Or => insts.push(RiscvInstruction::Bexp(Bop::Or, res, left, right)),
+                BinaryOp::Lt => insts.push(RiscvInstruction::Bexp(Bop::Slt, res, left, right)),
                 BinaryOp::Le => {
-                    insts.push(RiscvInstruction::Slt(res, right, left));
+                    insts.push(RiscvInstruction::Bexp(Bop::Slt, res, right, left));
                     insts.push(RiscvInstruction::Seqz(res, res));
                 }
-                BinaryOp::Gt => insts.push(RiscvInstruction::Slt(res, right, left)),
+                BinaryOp::Gt => insts.push(RiscvInstruction::Bexp(Bop::Slt, res, right, left)),
                 BinaryOp::Ge => {
-                    insts.push(RiscvInstruction::Slt(res, left, right));
+                    insts.push(RiscvInstruction::Bexp(Bop::Slt, res, left, right));
                     insts.push(RiscvInstruction::Seqz(res, res));
                 }
                 BinaryOp::Eq => {
-                    insts.push(RiscvInstruction::Xor(res, left, right));
+                    insts.push(RiscvInstruction::Bexp(Bop::Xor, res, left, right));
                     insts.push(RiscvInstruction::Seqz(res, res));
                 }
                 BinaryOp::NotEq => {
-                    insts.push(RiscvInstruction::Xor(res, left, right));
+                    insts.push(RiscvInstruction::Bexp(Bop::Xor, res, left, right));
                     insts.push(RiscvInstruction::Snez(res, res));
                 }
                 _ => unimplemented!(),
@@ -426,7 +427,7 @@ fn prepare_value(
         Some(AllocPos::StackPointer(pos)) => {
             let pos = *pos;
             let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
-            insts.push(RiscvInstruction::Addi(reg, Register::SP, pos));
+            insts.push(RiscvInstruction::Bexpi(Bop::Add, reg, Register::SP, pos));
             reg
         }
         None => match config.func_data.dfg().value(value).kind() {

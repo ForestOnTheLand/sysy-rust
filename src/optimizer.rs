@@ -1,5 +1,5 @@
 use crate::{
-    riscv::{RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram},
+    riscv::{Bop, RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram},
     translate_util::Register,
 };
 
@@ -24,29 +24,30 @@ impl RiscvFunction {
             for i in 0..num {
                 match block.instructions[i] {
                     Comment(_) => block.instructions[i] = Nop,
-                    Xori(d, s, 0) => {
-                        if d == s {
-                            block.instructions[i] = Nop
-                        }
-                    }
-                    Xor(d, s, Register::X0) => {
-                        if d == s {
-                            block.instructions[i] = Nop
-                        }
-                    }
                     Mv(d, s) => {
                         if d == s {
                             block.instructions[i] = Nop
                         }
                     }
-                    Muli(Register::X0, _, _) => block.instructions[i] = Nop,
-                    Add(dst, a, Register::X0) => {
+                    Bexpi(Bop::Xor, d, s, 0) => {
+                        if d == s {
+                            block.instructions[i] = Nop
+                        }
+                    }
+                    Bexp(Bop::Xor, d, s, Register::X0) => {
+                        if d == s {
+                            block.instructions[i] = Nop
+                        }
+                    }
+                    Bexp(Bop::Add, dst, a, Register::X0) => {
                         if dst == a {
                             block.instructions[i] = Nop
                         } else {
                             block.instructions[i] = Mv(dst, a)
                         }
                     }
+                    Bexp(_, Register::X0, _, _) => block.instructions[i] = Nop,
+                    Bexpi(_, Register::X0, _, _) => block.instructions[i] = Nop,
                     _ => {}
                 };
             }
@@ -62,13 +63,13 @@ impl RiscvFunction {
     ///   sw t1, 100(sp)
     /// ```
     fn fold_addi(&mut self) {
-        use RiscvInstruction::{Addi, Lw, Nop, Sw};
+        use RiscvInstruction::{Bexpi, Lw, Nop, Sw};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             let mut need_clean = false;
             for i in 0..(num - 1) {
                 match block.instructions[i] {
-                    Addi(address, base, offset) => match block.instructions[i + 1] {
+                    Bexpi(Bop::Add, address, base, offset) => match block.instructions[i + 1] {
                         Lw(dst, 0, addr) => {
                             if addr == address {
                                 block.instructions[i] = Nop;
@@ -101,25 +102,13 @@ impl RiscvFunction {
             for i in 0..(num - 1) {
                 if let Li(reg, value) = block.instructions[i] {
                     match block.instructions[i + 1] {
-                        Add(d, a, b) => {
+                        Bexp(op, d, a, b) => {
                             if b == reg {
                                 block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Addi(d, a, value);
+                                block.instructions[i + 1] = Bexpi(op, d, a, value);
                             }
                         }
-                        Sub(d, a, b) => {
-                            if b == reg {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Addi(d, a, -value);
-                            }
-                        }
-                        Mul(d, a, b) => {
-                            if b == reg {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Muli(d, a, value);
-                            }
-                        }
-                        Muli(d, a, b) => {
+                        Bexpi(Bop::Mul, d, a, b) => {
                             if a == reg {
                                 block.instructions[i] = Nop;
                                 block.instructions[i + 1] = Li(d, value * b);
@@ -129,18 +118,6 @@ impl RiscvFunction {
                             if s == reg {
                                 block.instructions[i] = Nop;
                                 block.instructions[i + 1] = Li(d, value);
-                            }
-                        }
-                        Slt(d, a, b) => {
-                            if b == reg {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Slti(d, a, value);
-                            }
-                        }
-                        Xor(d, a, b) => {
-                            if b == reg {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Xori(d, a, value);
                             }
                         }
                         _ => {}
