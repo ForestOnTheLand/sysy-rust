@@ -372,7 +372,11 @@ fn translate_instruction(
             let mut caller_saved = config.allocator.get_occupied_registers(value, call.args());
             caller_saved.retain(|(r, _)| !RegGroup::VAR.contains(r));
             for (i, (reg, _)) in caller_saved.iter().enumerate() {
-                insts.push(RiscvInstruction::Sw(*reg, 56 + i as i32 * 4, Register::S0));
+                insts.push(RiscvInstruction::Sw(
+                    *reg,
+                    -(56 + i as i32 * 4),
+                    Register::S0,
+                ));
             }
             // Save arguments into registers (a_) or onto stack
             for (i, &arg) in call.args().iter().enumerate() {
@@ -381,7 +385,7 @@ fn translate_instruction(
                     reg = Register::T0;
                     insts.push(RiscvInstruction::Lw(
                         reg,
-                        56 + index as i32 * 4,
+                        -(56 + index as i32 * 4),
                         Register::S0,
                     ));
                 }
@@ -404,7 +408,11 @@ fn translate_instruction(
             // Restore caller saved registers
             for (i, (reg, need_load)) in caller_saved.iter().enumerate() {
                 if *need_load {
-                    insts.push(RiscvInstruction::Lw(*reg, 56 + i as i32 * 4, Register::S0));
+                    insts.push(RiscvInstruction::Lw(
+                        *reg,
+                        -(56 + i as i32 * 4),
+                        Register::S0,
+                    ));
                 }
             }
         }

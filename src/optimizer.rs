@@ -1,6 +1,6 @@
 use crate::{
     riscv::{Bop, RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram},
-    translate_util::Register,
+    translate_util::{RegGroup, Register},
 };
 
 impl RiscvProgram {
@@ -73,23 +73,28 @@ impl RiscvFunction {
             }
             for i in 0..(num - 1) {
                 match block.instructions[i] {
-                    Bexpi(Bop::Add, address, base, offset) => match block.instructions[i + 1] {
-                        Lw(dst, int, addr) => {
-                            if addr == address {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Lw(dst, offset + int, base);
-                                need_clean = true;
-                            }
+                    Bexpi(Bop::Add, address, base, offset) => {
+                        if RegGroup::VAR.contains(&address) {
+                            continue;
                         }
-                        Sw(dst, int, addr) => {
-                            if addr == address {
-                                block.instructions[i] = Nop;
-                                block.instructions[i + 1] = Sw(dst, offset + int, base);
-                                need_clean = true;
+                        match block.instructions[i + 1] {
+                            Lw(dst, int, addr) => {
+                                if addr == address {
+                                    block.instructions[i] = Nop;
+                                    block.instructions[i + 1] = Lw(dst, offset + int, base);
+                                    need_clean = true;
+                                }
                             }
+                            Sw(dst, int, addr) => {
+                                if addr == address {
+                                    block.instructions[i] = Nop;
+                                    block.instructions[i + 1] = Sw(dst, offset + int, base);
+                                    need_clean = true;
+                                }
+                            }
+                            _ => {}
                         }
-                        _ => {}
-                    },
+                    }
                     _ => {}
                 }
             }
@@ -108,22 +113,29 @@ impl RiscvFunction {
             }
             for i in 0..(num - 1) {
                 if let Li(reg, value) = block.instructions[i] {
+                    let clear = !RegGroup::VAR.contains(&reg);
                     match block.instructions[i + 1] {
                         Bexp(op, d, a, b) => {
                             if b == reg {
-                                block.instructions[i] = Nop;
+                                if clear {
+                                    block.instructions[i] = Nop;
+                                }
                                 block.instructions[i + 1] = Bexpi(op, d, a, value);
                             }
                         }
                         Bexpi(Bop::Mul, d, a, b) => {
                             if a == reg {
-                                block.instructions[i] = Nop;
+                                if clear {
+                                    block.instructions[i] = Nop;
+                                }
                                 block.instructions[i + 1] = Li(d, value * b);
                             }
                         }
                         Mv(d, s) => {
                             if s == reg {
-                                block.instructions[i] = Nop;
+                                if clear {
+                                    block.instructions[i] = Nop;
+                                }
                                 block.instructions[i + 1] = Li(d, value);
                             }
                         }

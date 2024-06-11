@@ -74,13 +74,6 @@ impl RegGroup {
         }
     }
 
-    pub fn new_var() -> Self {
-        Self {
-            list: &Self::VAR,
-            state: [false; 32],
-        }
-    }
-
     pub fn new_store() -> Self {
         Self {
             list: &Self::STORE,
@@ -100,16 +93,6 @@ impl RegGroup {
             }
         }
         panic!("no available registers now");
-    }
-
-    pub fn try_get_vaccant(&mut self) -> Option<Register> {
-        for reg in self.list.iter() {
-            if !self.state[reg.0 as usize] {
-                self.state[reg.0 as usize] = true;
-                return Some(*reg);
-            }
-        }
-        None
     }
 
     pub fn reset(&mut self, reg: Register) {
