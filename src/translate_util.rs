@@ -63,9 +63,9 @@ pub struct RegGroup {
 }
 
 impl RegGroup {
-    const TEMP: [Register; 4] = register_list!(T1, T2, T3, T4);
-    const STORE: [Register; 8] = register_list!(A0, A1, A2, A3, A4, A5, A6, A7);
-    const VAR: [Register; 6] = register_list!(S1, S2, S3, S4, S5, S6);
+    pub const TEMP: [Register; 4] = register_list!(T1, T2, T3, T4);
+    pub const STORE: [Register; 8] = register_list!(A0, A1, A2, A3, A4, A5, A6, A7);
+    pub const VAR: [Register; 11] = register_list!(S1, S2, S3, S4, S5, S6, S7, S8, S9, S10, S11);
 
     pub fn new_temp() -> Self {
         Self {

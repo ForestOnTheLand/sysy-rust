@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeSet, HashMap},
 };
 
-use koopa::ir::{FunctionData, Value, ValueKind};
+use koopa::ir::{FunctionData, TypeKind, Value, ValueKind};
 
 use crate::translate_util::{RegGroup, Register};
 
@@ -39,6 +39,7 @@ impl Ord for ActiveVariable {
 pub struct LifeTime {
     pub index: HashMap<Value, u32>,
     pub interval: HashMap<Value, (u32, u32)>,
+    pub pre_alloc: HashMap<Value, Register>,
     insts: Vec<ActiveVariable>,
 }
 
@@ -46,6 +47,8 @@ impl LifeTime {
     pub fn new(func: &FunctionData) -> Self {
         let mut index = HashMap::new();
         let mut interval = HashMap::new();
+        let mut alloc_in_s = HashMap::new();
+        let mut pre_alloc = HashMap::new();
         let mut i = 1;
         for (_, bb) in func.layout().bbs() {
             for (value, _) in bb.insts() {
@@ -60,7 +63,21 @@ impl LifeTime {
                 }
                 if matches!(func.dfg().value(*value).kind(), ValueKind::Alloc(_)) {
                     if func.dfg().value(*value).name().is_some() {
+                        let size = match func.dfg().value(*value).ty().kind() {
+                            TypeKind::Pointer(value) => value.size(),
+                            _ => unreachable!(),
+                        };
+                        if size == 4 && alloc_in_s.len() < 11 {
+                            let reg = Register::S[1 + alloc_in_s.len()];
+                            alloc_in_s.insert(*value, reg);
+                            pre_alloc.insert(*value, reg);
+                        }
                         continue;
+                    }
+                }
+                if let ValueKind::Load(load) = func.dfg().value(*value).kind() {
+                    if let Some(reg) = alloc_in_s.get(&load.src()) {
+                        pre_alloc.insert(*value, *reg);
                     }
                 }
                 let mut l = u32::MAX;
@@ -87,6 +104,7 @@ impl LifeTime {
             index,
             interval,
             insts,
+            pre_alloc,
         }
     }
 }
@@ -107,6 +125,7 @@ impl Allocator {
                 index: HashMap::new(),
                 interval: HashMap::new(),
                 insts: Vec::new(),
+                pre_alloc: HashMap::new(),
             },
             active: BTreeSet::new(),
             allocation: HashMap::new(),
@@ -122,6 +141,9 @@ impl Allocator {
                 allocator.allocation.insert(inst.value, reg);
                 assert!(allocator.active.insert(inst));
             }
+        }
+        for (k, v) in lifetime.pre_alloc.iter() {
+            allocator.allocation.insert(*k, *v);
         }
         allocator.lifetime = lifetime;
         allocator

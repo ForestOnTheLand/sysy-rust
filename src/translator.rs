@@ -97,7 +97,6 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         program,
         func_data,
         table: RegGroup::new_temp(),
-        var_table: RegGroup::new_var(),
         symbol: AllocTable::new(),
         stack_layout: stack_layout.clone(),
         stack_pos: Box::new(stack_layout.args as i32 * 4),
@@ -130,18 +129,23 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
 /// - space for local variable
 /// - space for saving RISCV register `ra` (short for "return address")
 /// - space for function arguments
-fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> StackLayout {
+fn allocate_stack(func_data: &FunctionData, _allocator: &Allocator) -> StackLayout {
     let mut local = 0;
     let mut args = 0;
-    let mut save = 0;
+    let mut save_reg_a = 0;
+    let mut save_reg_s = 0;
     for (_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
             if !func_data.dfg().value(inst).ty().is_unit() {
                 let size = if matches!(func_data.dfg().value(inst).kind(), ValueKind::Alloc(_)) {
-                    match func_data.dfg().value(inst).ty().kind() {
+                    let size = match func_data.dfg().value(inst).ty().kind() {
                         TypeKind::Pointer(value) => value.size(),
                         _ => unreachable!(),
+                    };
+                    if size == 4 && save_reg_s < 11 {
+                        save_reg_s += 1;
                     }
+                    size
                 } else {
                     func_data.dfg().value(inst).ty().size()
                 };
@@ -151,19 +155,17 @@ fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> StackLayou
                 if call.args().len() > 8 {
                     args = max(args, call.args().len() - 8);
                 }
-                save = max(
-                    save,
-                    allocator.get_occupied_registers(inst, call.args()).len(),
-                );
+                save_reg_a = 8;
             }
         }
     }
-    let total = local + args * 4 + save * 4 + 48;
-    let stack_size = (total + 15) & !0xf;
+    let total = local + args * 4 + (save_reg_a + save_reg_s) * 4 + 80;
+    let total = (total + 15) & !0xf;
     StackLayout {
-        total: stack_size,
+        total,
         args,
-        save,
+        save_reg_a,
+        save_reg_s,
     }
 }
 
@@ -171,7 +173,6 @@ struct TranslateConfig<'a> {
     program: &'a Program,
     func_data: &'a FunctionData,
     table: RegGroup,
-    var_table: RegGroup,
     symbol: AllocTable,
     stack_layout: StackLayout,
     stack_pos: Box<i32>,
@@ -188,7 +189,7 @@ fn translate_instruction(
         Some(r) => insts.push(RiscvInstruction::Comment(format!(
             "{}: value in {r}, lifetime {:?}",
             config.allocator.lifetime.index.get(&value).unwrap(),
-            config.allocator.lifetime.interval.get(&value).unwrap()
+            config.allocator.lifetime.interval.get(&value)
         ))),
         None => insts.push(RiscvInstruction::Comment(format!("value on stack"))),
     }
@@ -199,20 +200,16 @@ fn translate_instruction(
                 _ => unreachable!(),
             };
             if let Some(reg) = config.allocator.allocation.get(&value) {
+                insts.push(RiscvInstruction::Comment(format!("alloc at {reg}")));
                 config.symbol.store_register_pointer(value, *reg);
-                return;
-            } else if size == 4 {
-                if let Some(pos) = config.var_table.try_get_vaccant() {
-                    config.symbol.store_register_pointer(value, pos);
-                    return;
-                }
+            } else {
+                insts.push(RiscvInstruction::Comment(format!(
+                    "alloc at {}(sp), size {}",
+                    *config.stack_pos, size
+                )));
+                config.symbol.store_stack_pointer(value, *config.stack_pos);
+                *config.stack_pos += size as i32;
             }
-            insts.push(RiscvInstruction::Comment(format!(
-                "alloc at {}(sp), size {}",
-                *config.stack_pos, size
-            )));
-            config.symbol.store_stack_pointer(value, *config.stack_pos);
-            *config.stack_pos += size as i32;
         }
 
         ValueKind::Load(load) => {
@@ -268,10 +265,11 @@ fn translate_instruction(
                 _ => unreachable!(),
             };
             let index = prepare_value(get.index(), insts, config, None);
-            insts.push(RiscvInstruction::Bexpi(Bop::Mul, index, index, s as i32));
-            insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
             config.table.reset(index);
-            save_value(value, reg, insts, config);
+            let tmp = config.table.get_vaccant();
+            insts.push(RiscvInstruction::Bexpi(Bop::Mul, tmp, index, s as i32));
+            insts.push(RiscvInstruction::Bexp(Bop::Add, tmp, reg, tmp));
+            save_value(value, tmp, insts, config);
         }
 
         ValueKind::GetElemPtr(get) => {
@@ -301,15 +299,17 @@ fn translate_instruction(
             };
             let expected = config.allocator.allocation.get(&value).cloned();
             let index = prepare_value(get.index(), insts, config, expected);
-            insts.push(RiscvInstruction::Bexpi(Bop::Mul, index, index, s as i32));
+            config.table.reset(index);
+            let tmp = config.table.get_vaccant();
+            insts.push(RiscvInstruction::Bexpi(Bop::Mul, tmp, index, s as i32));
             if let Some(dst) = expected {
-                insts.push(RiscvInstruction::Bexp(Bop::Add, dst, reg, index));
+                insts.push(RiscvInstruction::Bexp(Bop::Add, dst, reg, tmp));
                 config.table.reset(reg);
-                config.table.reset(index);
+                config.table.reset(tmp);
                 save_value(value, dst, insts, config);
             } else {
-                insts.push(RiscvInstruction::Bexp(Bop::Add, reg, reg, index));
-                config.table.reset(index);
+                insts.push(RiscvInstruction::Bexp(Bop::Add, tmp, reg, tmp));
+                config.table.reset(tmp);
                 save_value(value, reg, insts, config);
             }
         }
@@ -369,25 +369,26 @@ fn translate_instruction(
 
         ValueKind::Call(call) => {
             // Get currently occupied registers. Save them (a_) into s_ registers.
-            let caller_saved = config.allocator.get_occupied_registers(value, call.args());
+            let mut caller_saved = config.allocator.get_occupied_registers(value, call.args());
+            caller_saved.retain(|(r, _)| !RegGroup::VAR.contains(r));
             for (i, (reg, _)) in caller_saved.iter().enumerate() {
-                assert!(i <= 4);
-                insts.push(RiscvInstruction::Mv(Register::S[11 - i], *reg));
+                insts.push(RiscvInstruction::Sw(*reg, 56 + i as i32 * 4, Register::S0));
             }
             // Save arguments into registers (a_) or onto stack
             for (i, &arg) in call.args().iter().enumerate() {
                 let mut reg = prepare_value(arg, insts, config, None);
                 if let Some(index) = caller_saved.iter().position(|(r, _)| *r == reg) {
-                    reg = Register::S[11 - index];
+                    reg = Register::T0;
+                    insts.push(RiscvInstruction::Lw(
+                        reg,
+                        56 + index as i32 * 4,
+                        Register::S0,
+                    ));
                 }
                 if i < 8 {
                     insts.push(RiscvInstruction::Mv(Register::A[i], reg));
                 } else {
-                    insts.push(RiscvInstruction::Sw(
-                        reg,
-                        ((i - 8) * 4) as i32,
-                        Register::SP,
-                    ));
+                    insts.push(RiscvInstruction::Sw(reg, (i as i32 - 8) * 4, Register::SP));
                 }
                 config.table.reset(reg);
             }
@@ -403,7 +404,7 @@ fn translate_instruction(
             // Restore caller saved registers
             for (i, (reg, need_load)) in caller_saved.iter().enumerate() {
                 if *need_load {
-                    insts.push(RiscvInstruction::Mv(*reg, Register::S[11 - i]));
+                    insts.push(RiscvInstruction::Lw(*reg, 56 + i as i32 * 4, Register::S0));
                 }
             }
         }
