@@ -8,6 +8,7 @@ impl RiscvProgram {
         for func in self.functions.iter_mut() {
             func.clear_useless();
             func.fold_constant();
+            func.fold_move();
             func.fold_addi();
             func.fold_addi();
             func.eliminate_load();
@@ -67,7 +68,6 @@ impl RiscvFunction {
         use RiscvInstruction::{Bexpi, Lw, Nop, Sw};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
-            let mut need_clean = false;
             if num == 0 {
                 break;
             }
@@ -82,14 +82,12 @@ impl RiscvFunction {
                                 if addr == address {
                                     block.instructions[i] = Nop;
                                     block.instructions[i + 1] = Lw(dst, offset + int, base);
-                                    need_clean = true;
                                 }
                             }
                             Sw(dst, int, addr) => {
                                 if addr == address {
                                     block.instructions[i] = Nop;
                                     block.instructions[i + 1] = Sw(dst, offset + int, base);
-                                    need_clean = true;
                                 }
                             }
                             _ => {}
@@ -98,9 +96,46 @@ impl RiscvFunction {
                     _ => {}
                 }
             }
-            if need_clean {
-                block.clear_nop();
+            block.clear_nop();
+        }
+    }
+
+    fn fold_move(&mut self) {
+        use RiscvInstruction::{Bexp, Bexpi, Lw, Mv, Nop};
+        for block in self.blocks.iter_mut() {
+            let num = block.instructions.len();
+            if num == 0 {
+                break;
             }
+            for i in 1..(num - 1) {
+                if let Mv(dst, src) = block.instructions[i] {
+                    if RegGroup::VAR.contains(&src) {
+                        continue;
+                    }
+                    match block.instructions[i - 1] {
+                        Bexpi(op, d, a, b) => {
+                            if d == src {
+                                block.instructions[i - 1] = Nop;
+                                block.instructions[i] = Bexpi(op, dst, a, b);
+                            }
+                        }
+                        Bexp(op, d, a, b) => {
+                            if d == src {
+                                block.instructions[i - 1] = Nop;
+                                block.instructions[i] = Bexp(op, dst, a, b);
+                            }
+                        }
+                        Lw(d, a, b) => {
+                            if d == src {
+                                block.instructions[i - 1] = Nop;
+                                block.instructions[i] = Lw(dst, a, b);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            block.clear_nop();
         }
     }
 
