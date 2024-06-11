@@ -97,6 +97,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         program,
         func_data,
         table: RegGroup::new_temp(),
+        var_table: RegGroup::new_var(),
         symbol: AllocTable::new(),
         stack_layout: stack_layout.clone(),
         stack_pos: Box::new(stack_layout.args as i32 * 4),
@@ -152,12 +153,12 @@ fn allocate_stack(func_data: &FunctionData, allocator: &Allocator) -> StackLayou
                 }
                 save = max(
                     save,
-                    1 + allocator.get_occupied_registers(inst, call.args()).len(),
+                    allocator.get_occupied_registers(inst, call.args()).len(),
                 );
             }
         }
     }
-    let total = local + args * 4 + save * 4;
+    let total = local + args * 4 + save * 4 + 48;
     let stack_size = (total + 15) & !0xf;
     StackLayout {
         total: stack_size,
@@ -170,6 +171,7 @@ struct TranslateConfig<'a> {
     program: &'a Program,
     func_data: &'a FunctionData,
     table: RegGroup,
+    var_table: RegGroup,
     symbol: AllocTable,
     stack_layout: StackLayout,
     stack_pos: Box<i32>,
@@ -198,14 +200,19 @@ fn translate_instruction(
             };
             if let Some(reg) = config.allocator.allocation.get(&value) {
                 config.symbol.store_register_pointer(value, *reg);
-            } else {
-                insts.push(RiscvInstruction::Comment(format!(
-                    "alloc at {}(sp), size {}",
-                    *config.stack_pos, size
-                )));
-                config.symbol.store_stack_pointer(value, *config.stack_pos);
-                *config.stack_pos += size as i32;
+                return;
+            } else if size == 4 {
+                if let Some(pos) = config.var_table.try_get_vaccant() {
+                    config.symbol.store_register_pointer(value, pos);
+                    return;
+                }
             }
+            insts.push(RiscvInstruction::Comment(format!(
+                "alloc at {}(sp), size {}",
+                *config.stack_pos, size
+            )));
+            config.symbol.store_stack_pointer(value, *config.stack_pos);
+            *config.stack_pos += size as i32;
         }
 
         ValueKind::Load(load) => {
@@ -364,13 +371,14 @@ fn translate_instruction(
             // Get currently occupied registers. Save them (a_) into s_ registers.
             let caller_saved = config.allocator.get_occupied_registers(value, call.args());
             for (i, (reg, _)) in caller_saved.iter().enumerate() {
-                insts.push(RiscvInstruction::Mv(Register::S[i], *reg));
+                assert!(i <= 4);
+                insts.push(RiscvInstruction::Mv(Register::S[11 - i], *reg));
             }
             // Save arguments into registers (a_) or onto stack
             for (i, &arg) in call.args().iter().enumerate() {
                 let mut reg = prepare_value(arg, insts, config, None);
                 if let Some(index) = caller_saved.iter().position(|(r, _)| *r == reg) {
-                    reg = Register::S[index];
+                    reg = Register::S[11 - index];
                 }
                 if i < 8 {
                     insts.push(RiscvInstruction::Mv(Register::A[i], reg));
@@ -395,7 +403,7 @@ fn translate_instruction(
             // Restore caller saved registers
             for (i, (reg, need_load)) in caller_saved.iter().enumerate() {
                 if *need_load {
-                    insts.push(RiscvInstruction::Mv(*reg, Register::S[i]));
+                    insts.push(RiscvInstruction::Mv(*reg, Register::S[11 - i]));
                 }
             }
         }

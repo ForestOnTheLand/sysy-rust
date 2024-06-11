@@ -65,10 +65,18 @@ pub struct RegGroup {
 impl RegGroup {
     const TEMP: [Register; 4] = register_list!(T1, T2, T3, T4);
     const STORE: [Register; 8] = register_list!(A0, A1, A2, A3, A4, A5, A6, A7);
+    const VAR: [Register; 6] = register_list!(S1, S2, S3, S4, S5, S6);
 
     pub fn new_temp() -> Self {
         Self {
             list: &Self::TEMP,
+            state: [false; 32],
+        }
+    }
+
+    pub fn new_var() -> Self {
+        Self {
+            list: &Self::VAR,
             state: [false; 32],
         }
     }
@@ -85,13 +93,23 @@ impl RegGroup {
     }
 
     pub fn get_vaccant(&mut self) -> Register {
-        for reg in self.list.iter().cloned() {
+        for reg in self.list.iter() {
             if !self.state[reg.0 as usize] {
                 self.state[reg.0 as usize] = true;
-                return reg;
+                return *reg;
             }
         }
         panic!("no available registers now");
+    }
+
+    pub fn try_get_vaccant(&mut self) -> Option<Register> {
+        for reg in self.list.iter() {
+            if !self.state[reg.0 as usize] {
+                self.state[reg.0 as usize] = true;
+                return Some(*reg);
+            }
+        }
+        None
     }
 
     pub fn reset(&mut self, reg: Register) {

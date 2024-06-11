@@ -32,6 +32,7 @@ pub struct RiscvBlock {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Bop {
     Add,
     Sub,
@@ -74,6 +75,7 @@ impl Bop {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum RiscvInstruction {
     Nop,
     // Comment
@@ -148,11 +150,9 @@ impl std::fmt::Display for RiscvFunction {
         let name = &self.blocks[0].name;
         writeln!(f, "  .globl {}\n{}:", name, name)?;
         let stack_size = self.stack_layout.total;
-        if self.stack_layout.save != 0 {
-            writeln!(f, "  sw ra, -4(sp)")?;
-            for i in 1..self.stack_layout.save {
-                writeln!(f, "  sw s{}, -{}(sp)", i - 1, 4 + 4 * i)?;
-            }
+        writeln!(f, "  sw ra, -4(sp)")?;
+        for i in 1..12 {
+            writeln!(f, "  sw s{}, -{}(sp)", i, 4 + 4 * i)?;
         }
         if stack_size != 0 {
             if stack_size < 2048 {
@@ -192,11 +192,9 @@ impl std::fmt::Display for RiscvInstruction {
                         writeln!(f, "  add sp, sp, t0")?;
                     }
                 }
-                if layout.save != 0 {
-                    writeln!(f, "  lw ra, -4(sp)")?;
-                    for i in 1..layout.save {
-                        writeln!(f, "  lw s{}, -{}(sp)", i - 1, 4 + 4 * i)?;
-                    }
+                writeln!(f, "  lw ra, -4(sp)")?;
+                for i in 1..12 {
+                    writeln!(f, "  lw s{}, -{}(sp)", i, 4 + 4 * i)?;
                 }
 
                 writeln!(f, "  ret")

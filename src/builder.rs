@@ -3,7 +3,6 @@
 use crate::ast::*;
 use crate::build_util::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
-use koopa::front::ast::Branch;
 use koopa::ir::{builder_traits::*, TypeKind, ValueKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
@@ -461,7 +460,7 @@ fn build_stmt(
             let id = symtab.get_id();
             let then_bb = new_bb(func, format!("%koopa_builtin_then_{id}"));
             let end_bb = new_bb(func, format!("%koopa_builtin_end_if_{id}"));
-            let else_bb = if let Some(false_branch) = false_branch {
+            let else_bb = if false_branch.is_some() {
                 new_bb(func, format!("%koopa_builtin_else_{id}"))
             } else {
                 end_bb
