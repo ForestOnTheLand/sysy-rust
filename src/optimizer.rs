@@ -10,7 +10,7 @@ impl RiscvProgram {
             func.fold_constant();
             func.fold_move();
             func.fold_addi();
-            func.fold_addi();
+            func.fold_condition();
             func.eliminate_load();
             func.eliminate_jump();
         }
@@ -68,26 +68,23 @@ impl RiscvFunction {
         use RiscvInstruction::{Bexpi, Lw, Nop, Sw};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
-            if num == 0 {
-                break;
-            }
-            for i in 0..(num - 1) {
-                match block.instructions[i] {
+            for i in (1..num).rev() {
+                match block.instructions[i - 1] {
                     Bexpi(Bop::Add, address, base, offset) => {
                         if RegGroup::VAR.contains(&address) {
                             continue;
                         }
-                        match block.instructions[i + 1] {
+                        match block.instructions[i] {
                             Lw(dst, int, addr) => {
                                 if addr == address {
                                     block.instructions[i] = Nop;
-                                    block.instructions[i + 1] = Lw(dst, offset + int, base);
+                                    block.instructions[i - 1] = Lw(dst, offset + int, base);
                                 }
                             }
                             Sw(dst, int, addr) => {
                                 if addr == address {
                                     block.instructions[i] = Nop;
-                                    block.instructions[i + 1] = Sw(dst, offset + int, base);
+                                    block.instructions[i - 1] = Sw(dst, offset + int, base);
                                 }
                             }
                             _ => {}
@@ -100,12 +97,70 @@ impl RiscvFunction {
         }
     }
 
+    fn fold_condition(&mut self) {
+        use RiscvInstruction::*;
+        for block in self.blocks.iter_mut() {
+            let num = block.instructions.len();
+            if num == 0 {
+                continue;
+            }
+            for i in (1..num).rev() {
+                match block.instructions[i] {
+                    Beqz(cond, ref label) => match block.instructions[i - 1] {
+                        Snez(dst, src) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Beqz(src, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        Seqz(dst, src) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Bnez(src, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        Bexp(Bop::Slt, dst, a, b) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Bge(a, b, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        _ => {}
+                    },
+                    Bnez(cond, ref label) => match block.instructions[i - 1] {
+                        Snez(dst, src) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Bnez(src, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        Seqz(dst, src) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Beqz(src, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        Bexp(Bop::Slt, dst, a, b) => {
+                            if dst == cond {
+                                block.instructions[i - 1] = Blt(a, b, label.clone());
+                                block.instructions[i] = Nop;
+                            }
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                }
+            }
+            block.clear_nop();
+        }
+    }
+
     fn fold_move(&mut self) {
         use RiscvInstruction::{Bexp, Bexpi, Lw, Mv, Nop};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             if num == 0 {
-                break;
+                continue;
             }
             for i in 1..(num - 1) {
                 if let Mv(dst, src) = block.instructions[i] {
@@ -144,7 +199,7 @@ impl RiscvFunction {
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             if num == 0 {
-                break;
+                continue;
             }
             for i in 0..(num - 1) {
                 if let Li(reg, value) = block.instructions[i] {
@@ -193,7 +248,7 @@ impl RiscvFunction {
             let num = block.instructions.len();
             let mut need_clean = false;
             if num == 0 {
-                break;
+                continue;
             }
             for i in 0..(num - 1) {
                 if let Sw(reg_1, offset_1, addr_1) = block.instructions[i] {

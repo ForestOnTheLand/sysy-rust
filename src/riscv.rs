@@ -84,6 +84,8 @@ pub enum RiscvInstruction {
     // Control flow
     Beqz(Register, String),
     Bnez(Register, String),
+    Bge(Register, Register, String),
+    Blt(Register, Register, String),
     Jump(String),
     Call(String),
     Ret(StackLayout),
@@ -183,6 +185,8 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Nop => Ok(()),
             RiscvInstruction::Beqz(d, s) => writeln!(f, "  beqz {d}, {s}"),
             RiscvInstruction::Bnez(d, s) => writeln!(f, "  bnez {d}, {s}"),
+            RiscvInstruction::Blt(a, b, s) => writeln!(f, "  blt {a}, {b}, {s}"),
+            RiscvInstruction::Bge(a, b, s) => writeln!(f, "  bge {a}, {b}, {s}"),
             RiscvInstruction::Jump(label) => writeln!(f, "  j {label}"),
             RiscvInstruction::Call(label) => writeln!(f, "  call {label}"),
             RiscvInstruction::Ret(layout) => {

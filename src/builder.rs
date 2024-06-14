@@ -31,41 +31,37 @@ pub fn build_program(comp_unit: &CompUnit) -> Program {
 
 /// Declare Sysy builtin functions.
 fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
-    let builtin_functions: Vec<(String, Vec<Type>, Type)> = vec![
+    let builtin_functions: Vec<(&'static str, Vec<Type>, Type)> = vec![
         // decl @getint(): i32
-        ("getint".to_string(), vec![], Type::get_i32()),
+        ("getint", vec![], Type::get_i32()),
         // decl @getch(): i32
-        ("getch".to_string(), vec![], Type::get_i32()),
+        ("getch", vec![], Type::get_i32()),
         // decl @getarray(*i32): i32
         (
-            "getarray".to_string(),
+            "getarray",
             vec![Type::get_pointer(Type::get_i32())],
             Type::get_i32(),
         ),
         // decl @putint(i32)
-        (
-            "putint".to_string(),
-            vec![Type::get_i32()],
-            Type::get_unit(),
-        ),
+        ("putint", vec![Type::get_i32()], Type::get_unit()),
         // decl @putch(i32)
-        ("putch".to_string(), vec![Type::get_i32()], Type::get_unit()),
+        ("putch", vec![Type::get_i32()], Type::get_unit()),
         // decl @putarray(i32, *i32)
         (
-            "putarray".to_string(),
+            "putarray",
             vec![Type::get_i32(), Type::get_pointer(Type::get_i32())],
             Type::get_unit(),
         ),
         // decl @starttime()
-        ("starttime".to_string(), vec![], Type::get_unit()),
+        ("starttime", vec![], Type::get_unit()),
         // decl @stoptime()
-        ("stoptime".to_string(), vec![], Type::get_unit()),
+        ("stoptime", vec![], Type::get_unit()),
     ];
 
     for (name, params_ty, ret_ty) in builtin_functions {
         let data = FunctionData::new_decl(format!("@{name}"), params_ty, ret_ty);
         let function = program.new_func(data);
-        symtab.insert_function(name, function);
+        symtab.insert_function(name.to_string(), function);
     }
 }
 
@@ -584,78 +580,29 @@ fn build_exp(
         }
         // Build a binary expression
         Exp::Binary(left, op, right) => match op {
-            BinaryOperator::And => {
-                let zero = new_value!(func).integer(0);
-
-                let (left, bb) = build_exp(func, bb, left, symtab);
-
-                let result = new_value!(func).alloc(Type::get_i32());
-                add_value(func, bb, result);
-                let assign = new_value!(func).store(zero, result);
-                add_value(func, bb, assign);
-
-                let id = symtab.get_id();
-                let and = new_bb(func, format!("%koopa_builtin_and_{id}"));
-                add_bb(func, and);
-                let end_and = new_bb(func, format!("%koopa_builtin_end_and_{id}"));
-
-                let branch = new_value!(func).branch(left, and, end_and);
-                add_value(func, bb, branch);
-
-                let (right, bb) = build_exp(func, and, right, symtab);
-                let right = if let Some(right_value) = get_integer(func, right) {
-                    new_value!(func).integer((right_value != 0) as i32)
-                } else {
-                    let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-                    add_value(func, bb, right);
-                    right
-                };
-                let assign = new_value!(func).store(right, result);
-                add_value(func, bb, assign);
-                let jmp = new_value!(func).jump(end_and);
-                add_value(func, bb, jmp);
-
-                add_bb(func, end_and);
-                let result = new_value!(func).load(result);
-                add_value(func, end_and, result);
-                (result, end_and)
-            }
-            BinaryOperator::Or => {
-                let zero = new_value!(func).integer(0);
+            BinaryOperator::And | BinaryOperator::Or => {
                 let one = new_value!(func).integer(1);
-
-                let (left, bb) = build_exp(func, bb, left, symtab);
-
+                let zero = new_value!(func).integer(0);
+                let id = symtab.get_id();
+                let true_bb = new_bb(func, format!("%koopa_builtin_true_{id}"));
+                let false_bb = new_bb(func, format!("%koopa_builtin_false_{id}"));
+                let exit_bb = new_bb(func, format!("%koopa_builtin_end_{id}"));
                 let result = new_value!(func).alloc(Type::get_i32());
                 add_value(func, bb, result);
+                build_logical_exp(func, bb, true_bb, false_bb, exp, symtab);
+                add_bb(func, true_bb);
+                add_bb(func, false_bb);
                 let assign = new_value!(func).store(one, result);
-                add_value(func, bb, assign);
-
-                let id = symtab.get_id();
-                let or = new_bb(func, format!("%koopa_builtin_or_{id}"));
-                add_bb(func, or);
-                let end_or = new_bb(func, format!("%koopa_builtin_end_or_{id}"));
-
-                let branch = new_value!(func).branch(left, end_or, or);
-                add_value(func, bb, branch);
-
-                let (right, bb) = build_exp(func, or, right, symtab);
-                let right = if let Some(right_value) = get_integer(func, right) {
-                    new_value!(func).integer((right_value != 0) as i32)
-                } else {
-                    let right = new_value!(func).binary(BinaryOp::NotEq, right, zero);
-                    add_value(func, bb, right);
-                    right
-                };
-                let assign = new_value!(func).store(right, result);
-                add_value(func, bb, assign);
-                let jmp = new_value!(func).jump(end_or);
-                add_value(func, bb, jmp);
-
-                add_bb(func, end_or);
+                add_value(func, true_bb, assign);
+                let assign = new_value!(func).store(zero, result);
+                add_value(func, false_bb, assign);
+                let jump = new_value!(func).jump(exit_bb);
+                add_value(func, true_bb, jump);
+                add_value(func, false_bb, jump);
+                add_bb(func, exit_bb);
                 let result = new_value!(func).load(result);
-                add_value(func, end_or, result);
-                (result, end_or)
+                add_value(func, exit_bb, result);
+                (result, exit_bb)
             }
             // Default
             _ => {
@@ -712,6 +659,7 @@ fn build_logical_exp(
             add_bb(func, temp_bb);
             build_logical_exp(func, temp_bb, true_bb, false_bb, right, symtab);
         }
+        // Others, just evaluate and jump
         _ => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
             let branch = new_value!(func).branch(value, true_bb, false_bb);
@@ -739,7 +687,7 @@ fn add_value(func: &mut FunctionData, bb: BasicBlock, inst: Value) {
             .bb_mut(bb)
             .insts_mut()
             .push_key_back(inst)
-            .unwrap()
+            .unwrap();
     }
 }
 
