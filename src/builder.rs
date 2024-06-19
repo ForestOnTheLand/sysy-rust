@@ -78,17 +78,18 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
 /// Write a **global** [`GlobalDecl`] into a program,
 /// with functions [`build_global_const_decl`], [`build_global_var_decl`] used.
 fn build_global_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
-    match decl {
-        Decl::Const(decl) => build_global_const_decl(program, decl, symtab),
-        Decl::Var(decl) => build_global_var_decl(program, decl, symtab),
-    };
+    if decl.mutable {
+        build_global_var_decl(program, decl, symtab)
+    } else {
+        build_global_const_decl(program, decl, symtab)
+    }
 }
 
 /// Write a **global** [`ConstDecl`] into a program,
 /// with function [`build_global_const_def`] used.
-fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut SymbolTable) {
+fn build_global_const_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
     assert_eq!(decl.btype, BuiltinType::Int);
-    for def in decl.const_defs.iter() {
+    for def in decl.defs.iter() {
         build_global_const_def(program, def, symtab);
     }
 }
@@ -97,7 +98,7 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 /// with function [`compute_init_value`] used.
 fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
-    let data = def.init_val.as_ref().expect("expected an initial value");
+    let data = def.init.as_ref().expect("expected an initial value");
     let data = compute_init_value(data, shape.clone(), symtab);
 
     if shape.is_empty() {
@@ -113,9 +114,9 @@ fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolT
 
 /// Write a **global** [`GlobalVarDecl`] into a program,
 /// with function [`build_global_var_def`] used.
-fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut SymbolTable) {
+fn build_global_var_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
     assert_eq!(decl.btype, BuiltinType::Int);
-    for def in decl.var_defs.iter() {
+    for def in decl.defs.iter() {
         build_global_var_def(program, def, symtab);
     }
 }
@@ -124,7 +125,7 @@ fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut Sym
 /// with function [`build_global_var_def`] used.
 fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
-    let data: Value = match &def.init_val {
+    let data: Value = match &def.init {
         Some(init_val) => {
             let elems = compute_init_value(init_val, shape.clone(), symtab);
             if shape.is_empty() {
@@ -237,7 +238,7 @@ fn build_block(
 ) -> BasicBlock {
     symtab.enter_block();
     let mut next_bb = bb;
-    for block_item in block.block_items.iter() {
+    for block_item in block.items.iter() {
         next_bb = build_block_item(func, next_bb, block_item, symtab);
     }
     symtab.quit_block();
@@ -264,12 +265,11 @@ fn build_decl(
     decl: &Decl,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
-    match decl {
-        Decl::Const(decl) => {
-            build_const_decl(func, bb, decl, symtab);
-            bb
-        }
-        Decl::Var(decl) => build_var_decl(func, bb, decl, symtab),
+    if decl.mutable {
+        build_var_decl(func, bb, decl, symtab)
+    } else {
+        build_const_decl(func, bb, decl, symtab);
+        bb
     }
 }
 
@@ -277,11 +277,11 @@ fn build_decl(
 fn build_var_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
-    decl: &VarDecl,
+    decl: &Decl,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
     let mut bb = bb;
-    for def in decl.var_defs.iter() {
+    for def in decl.defs.iter() {
         bb = build_var_def(func, bb, def, symtab);
     }
     bb
@@ -306,7 +306,7 @@ fn build_var_def(
     add_value(func, bb, var);
     let ty = func.dfg().value(var).ty().clone();
     symtab.insert_var(def.ident.clone(), var, ty);
-    if let Some(init_value) = &def.init_val {
+    if let Some(init_value) = &def.init {
         let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
         let value = local_packing(func, values, &shape);
         let store = new_value!(func).store(value, var);
@@ -320,10 +320,10 @@ fn build_var_def(
 fn build_const_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
-    decl: &ConstDecl,
+    decl: &Decl,
     symtab: &mut SymbolTable,
 ) {
-    for def in decl.const_defs.iter() {
+    for def in decl.defs.iter() {
         build_const_def(func, bb, def, symtab);
     }
 }
@@ -334,7 +334,7 @@ fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &
         .iter()
         .map(|exp| compute_exp(exp, symtab) as usize)
         .collect();
-    let data = def.init_val.as_ref().expect("expected an initial value");
+    let data = def.init.as_ref().expect("expected an initial value");
     let data = compute_init_value(data, shape.clone(), symtab);
 
     if shape.is_empty() {
@@ -560,60 +560,56 @@ fn build_exp(
         Exp::Call(ident, params) => {
             let mut bb = bb;
             let mut args = Vec::new();
-            if let Some(params) = params {
-                for param in params.exps.iter() {
-                    let (value, next_bb) = build_exp(func, bb, param, symtab);
-                    bb = next_bb;
-                    args.push(value);
-                }
+            for param in params.iter() {
+                let (value, next_bb) = build_exp(func, bb, param, symtab);
+                bb = next_bb;
+                args.push(value);
             }
             let result = new_value!(func).call(symtab.get_function(ident), args);
             add_value(func, bb, result);
             (result, bb)
         }
         // Build a binary expression
-        Exp::Binary(left, op, right) => match op {
-            BinaryOperator::And | BinaryOperator::Or => {
-                let one = new_value!(func).integer(1);
-                let zero = new_value!(func).integer(0);
-                let id = symtab.get_id();
-                let true_bb = new_bb(func, format!("%koopa_builtin_true_{id}"));
-                let false_bb = new_bb(func, format!("%koopa_builtin_false_{id}"));
-                let exit_bb = new_bb(func, format!("%koopa_builtin_end_{id}"));
-                let result = new_value!(func).alloc(Type::get_i32());
-                add_value(func, bb, result);
-                build_logical_exp(func, bb, true_bb, false_bb, exp, symtab);
-                add_bb(func, true_bb);
-                add_bb(func, false_bb);
-                let assign = new_value!(func).store(one, result);
-                add_value(func, true_bb, assign);
-                let assign = new_value!(func).store(zero, result);
-                add_value(func, false_bb, assign);
-                let jump = new_value!(func).jump(exit_bb);
-                add_value(func, true_bb, jump);
-                add_value(func, false_bb, jump);
-                add_bb(func, exit_bb);
-                let result = new_value!(func).load(result);
-                add_value(func, exit_bb, result);
-                (result, exit_bb)
-            }
-            // Default
-            _ => {
-                let (left, bb) = build_exp(func, bb, left, symtab);
-                let (right, bb) = build_exp(func, bb, right, symtab);
-                if let Some(left_value) = get_integer(func, left) {
-                    if let Some(right_value) = get_integer(func, right) {
-                        return (
-                            new_value!(func).integer(op.compute(left_value, right_value)),
-                            bb,
-                        );
-                    }
+        Exp::Binary(_, BinaryOperator::And | BinaryOperator::Or, _) => {
+            let one = new_value!(func).integer(1);
+            let zero = new_value!(func).integer(0);
+            let id = symtab.get_id();
+            let true_bb = new_bb(func, format!("%koopa_builtin_true_{id}"));
+            let false_bb = new_bb(func, format!("%koopa_builtin_false_{id}"));
+            let exit_bb = new_bb(func, format!("%koopa_builtin_end_{id}"));
+            let result = new_value!(func).alloc(Type::get_i32());
+            add_value(func, bb, result);
+            build_logical_exp(func, bb, true_bb, false_bb, exp, symtab);
+            add_bb(func, true_bb);
+            add_bb(func, false_bb);
+            let assign = new_value!(func).store(one, result);
+            add_value(func, true_bb, assign);
+            let assign = new_value!(func).store(zero, result);
+            add_value(func, false_bb, assign);
+            let jump = new_value!(func).jump(exit_bb);
+            add_value(func, true_bb, jump);
+            add_value(func, false_bb, jump);
+            add_bb(func, exit_bb);
+            let result = new_value!(func).load(result);
+            add_value(func, exit_bb, result);
+            (result, exit_bb)
+        }
+        // Default
+        Exp::Binary(left, op, right) => {
+            let (left, bb) = build_exp(func, bb, left, symtab);
+            let (right, bb) = build_exp(func, bb, right, symtab);
+            if let Some(left_value) = get_integer(func, left) {
+                if let Some(right_value) = get_integer(func, right) {
+                    return (
+                        new_value!(func).integer(op.compute(left_value, right_value)),
+                        bb,
+                    );
                 }
-                let value = new_value!(func).binary(op.clone().into(), left, right);
-                add_value(func, bb, value);
-                (value, bb)
             }
-        },
+            let value = new_value!(func).binary(op.clone().into(), left, right);
+            add_value(func, bb, value);
+            (value, bb)
+        }
     }
 }
 

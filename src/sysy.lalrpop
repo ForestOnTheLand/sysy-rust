@@ -13,15 +13,10 @@ match {
     _
 }
 
-Comma<T>: Vec<T> = <mut v: (<T> ",")*> <e: T> => {
-    v.push(e);
-    v
-};
+Comma<T>: Vec<T> = <mut v: (<T> ",")*> <e: T> => { v.push(e); v };
 
 // CompUnit ::= {GlobalItem}
-pub CompUnit: Box<CompUnit> = {
-    <items: (<GlobalItem>)*> => Box::new(CompUnit { <> }),
-}
+pub CompUnit: Box<CompUnit> = <items: (<GlobalItem>)*> => Box::new(CompUnit { <> });
 
 // GlobalItem ::= FuncDef | Decl
 GlobalItem: Box<GlobalItem> = {
@@ -30,11 +25,8 @@ GlobalItem: Box<GlobalItem> = {
 }
 
 // FuncDef ::= BuiltinType IDENT "(" [FuncFParams] ")" Block
-FuncDef: Box<FuncDef> = {
-    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
-        Box::new(FuncDef { <> })
-    }
-}
+FuncDef: Box<FuncDef> =
+    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => Box::new(FuncDef { <> });
 
 // FuncFParams ::= FuncFParam {"," FuncFParam}
 FuncFParams: Box<FuncFParams> = <params: Comma<FuncFParam>> => Box::new(FuncFParams{ <> });
@@ -47,7 +39,7 @@ FuncFParam: Box<FuncFParam> = {
 }
 
 // Block ::= "{" {BlockItem} "}"
-Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
+Block: Block = "{" <items: BlockItem*> "}" => Block { <> };
 
 // BlockItem ::= Decl | Stmt
 BlockItem: Box<BlockItem> = {
@@ -87,17 +79,12 @@ OpenStmt: Box<Stmt> = {
 
 // Decl ::= ConstDecl | VarDecl
 Decl: Box<Decl> = {
-    ConstDecl => Box::new(Decl::Const( <> )),
-    VarDecl => Box::new(Decl::Var( <> )),
+    "const" <btype: BuiltinType> <defs: Comma<Def>> ";" => Box::new(Decl { <>, mutable: false }),
+    <btype: BuiltinType> <defs: Comma<Def>> ";" => Box::new(Decl { <>, mutable: true }),
 }
-
-// VarDecl ::= BuiltinType Def {"," Def} ";"
-VarDecl: Box<VarDecl> = <btype: BuiltinType> <var_defs: Comma<Def>> ";" => Box::new(VarDecl { <> });
 
 // Def ::= IDENT ["[" Exp "]"] | IDENT ["[" Exp "]"] "=" InitVal
-Def: Box<Def> = {
-    <ident: Ident> <shape: ("[" <Exp> "]")*> <init_val: ("=" <InitVal>)?> => Box::new(Def { <> }),
-}
+Def: Box<Def> = <ident: Ident> <shape: ("[" <Exp> "]")*> <init: ("=" <InitVal>)?> => Box::new(Def { <> });
 
 // InitVal ::= Exp | "{" [Exp {"," Exp}] "}"
 InitVal: Box<InitVal> = {
@@ -105,13 +92,8 @@ InitVal: Box<InitVal> = {
     "{" <exp: (<Comma<InitVal>>)?> "}" => Box::new(InitVal::Array( exp.unwrap_or(Vec::new()) )),
 }
 
-// ConstDecl ::= "const" BuiltinType Def {"," Def} ";"
-ConstDecl: Box<ConstDecl> = "const" <btype: BuiltinType> <const_defs: Comma<Def>> ";" => Box::new(ConstDecl { <> });
-
 // LVal ::= IDENT ["[" Exp "]"]
-LVal: LVal = {
-    <ident: Ident> <index: ("[" <Exp> "]")*> => LVal{ <> },
-}
+LVal: LVal = <ident: Ident> <index: ("[" <Exp> "]")*> => LVal{ <> };
 // Exp ::= LOrExp
 Exp: Box<Exp> = <lor_exp: LOrExp> => <>;
 // PrimaryExp ::= "(" Exp ")" | LVal | Number
@@ -124,10 +106,10 @@ PrimaryExp: Box<Exp> = {
 UnaryExp: Box<Exp> = {
     <PrimaryExp> => <>,
     <UnaryOperator> <UnaryExp> => Box::new(Exp::Unary( <> )),
-    <Ident> "(" <FuncRParams?> ")" => Box::new(Exp::Call( <> )),
+    <Ident> "(" <FuncRParams> ")" => Box::new(Exp::Call( <> )),
 }
 // FuncRParams ::= Exp {"," Exp}
-FuncRParams: Box<FuncRParams> = <exps: Comma<Exp>> => Box::new(FuncRParams { <> });
+FuncRParams: Vec<Box<Exp>> = (<Comma<Exp>>)? => <>.unwrap_or(Vec::new());
 // UnaryOp ::= "+" | "-" | "!"
 UnaryOperator: UnaryOperator = {
     "+" => UnaryOperator::Pos,

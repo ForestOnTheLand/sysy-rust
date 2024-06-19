@@ -54,7 +54,7 @@ pub struct FuncFParam {
 /// [`Block`] `::=` `"{"` {[`BlockItem`]} `"}"`
 #[derive(Debug)]
 pub struct Block {
-    pub block_items: Vec<Box<BlockItem>>,
+    pub items: Vec<Box<BlockItem>>,
 }
 
 /// [`BlockItem`] `::=` [`Decl`] | [`Stmt`]
@@ -84,27 +84,13 @@ pub enum Stmt {
     Return(Option<Box<Exp>>),
 }
 
-/// [`Decl`] `::=` [`ConstDecl`] | [`VarDecl`]
-#[derive(Debug)]
-pub enum Decl {
-    Const(Box<ConstDecl>),
-    Var(Box<VarDecl>),
-}
-
-/// [`VarDecl`] `::=` [`BuiltinType`] [`Def`] {`","` [`Def`]} `""`
-#[derive(Debug)]
-pub struct VarDecl {
-    pub btype: BuiltinType,
-    pub var_defs: Vec<Box<Def>>,
-}
-
 /// [`Def`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
 ///               | `IDENT` {`"["` [`Exp`] `"]"`} `"="` [`InitVal`]
 #[derive(Debug)]
 pub struct Def {
     pub ident: String,
     pub shape: Vec<Box<Exp>>,
-    pub init_val: Option<Box<InitVal>>,
+    pub init: Option<Box<InitVal>>,
 }
 
 /// [`InitVal`] `::=` [`Exp`] | `"{"` [[`InitVal`] {`","` [`InitVal`]}] `"}"`
@@ -114,11 +100,12 @@ pub enum InitVal {
     Array(Vec<Box<InitVal>>),
 }
 
-/// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`Def`] {`","` [`Def`]} ``";"``
+/// [`Decl`] `::=` [`"const"`] [`BuiltinType`] [`Def`] {`","` [`Def`]} ``";"``
 #[derive(Debug)]
-pub struct ConstDecl {
+pub struct Decl {
     pub btype: BuiltinType,
-    pub const_defs: Vec<Box<Def>>,
+    pub defs: Vec<Box<Def>>,
+    pub mutable: bool,
 }
 
 /// [`LVal`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
@@ -139,7 +126,7 @@ pub enum Exp {
     Number(i32),
     Binary(Box<Exp>, BinaryOperator, Box<Exp>),
     Unary(UnaryOperator, Box<Exp>),
-    Call(String, Option<Box<FuncRParams>>),
+    Call(String, Vec<Box<Exp>>),
 }
 
 /// [`FuncRParams`] ::= [`Exp`] {`","` [`Exp`]};
