@@ -26,30 +26,16 @@ impl RiscvFunction {
             for i in 0..num {
                 match block.instructions[i] {
                     Comment(_) => block.instructions[i] = Nop,
-                    Mv(d, s) => {
-                        if d == s {
-                            block.instructions[i] = Nop
-                        }
+                    Mv(d, s) if d == s => block.instructions[i] = Nop,
+                    Bexpi(Bop::Xor, d, s, 0) if d == s => block.instructions[i] = Nop,
+                    Bexp(Bop::Xor, d, s, Register::X0) if d == s => block.instructions[i] = Nop,
+                    Bexpi(Bop::Mul, dst, Register::X0, _) => block.instructions[i] = Li(dst, 0),
+                    Bexpi(Bop::Add, dst, a, 0) | Bexp(Bop::Add, dst, a, Register::X0) => {
+                        block.instructions[i] = if dst == a { Nop } else { Mv(dst, a) };
                     }
-                    Bexpi(Bop::Xor, d, s, 0) => {
-                        if d == s {
-                            block.instructions[i] = Nop
-                        }
-                    }
-                    Bexp(Bop::Xor, d, s, Register::X0) => {
-                        if d == s {
-                            block.instructions[i] = Nop
-                        }
-                    }
-                    Bexp(Bop::Add, dst, a, Register::X0) => {
-                        if dst == a {
-                            block.instructions[i] = Nop
-                        } else {
-                            block.instructions[i] = Mv(dst, a)
-                        }
-                    }
-                    Bexp(_, Register::X0, _, _) => block.instructions[i] = Nop,
-                    Bexpi(_, Register::X0, _, _) => block.instructions[i] = Nop,
+
+                    // Bexp(_, Register::X0, _, _) => block.instructions[i] = Nop,
+                    // Bexpi(_, Register::X0, _, _) => block.instructions[i] = Nop,
                     _ => {}
                 };
             }
@@ -65,29 +51,30 @@ impl RiscvFunction {
     ///   sw t1, 100(sp)
     /// ```
     fn fold_addi(&mut self) {
-        use RiscvInstruction::{Bexpi, Lw, Nop, Sw};
+        use RiscvInstruction::{Bexp, Bexpi, Lw, Mv, Nop, Sw};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             for i in (1..num).rev() {
-                match block.instructions[i - 1] {
-                    Bexpi(Bop::Add, address, base, offset) => {
-                        if RegGroup::VAR.contains(&address) {
-                            continue;
+                let (address, base, offset) = match block.instructions[i - 1] {
+                    Bexpi(Bop::Add, address, base, offset) => (address, base, offset),
+                    Bexp(Bop::Add, address, base, Register::X0) => (address, base, 0),
+                    Mv(address, base) => (address, base, 0),
+                    _ => continue,
+                };
+                if RegGroup::VAR.contains(&address) {
+                    continue;
+                }
+                match block.instructions[i] {
+                    Lw(dst, int, addr) => {
+                        if addr == address {
+                            block.instructions[i] = Nop;
+                            block.instructions[i - 1] = Lw(dst, offset + int, base);
                         }
-                        match block.instructions[i] {
-                            Lw(dst, int, addr) => {
-                                if addr == address {
-                                    block.instructions[i] = Nop;
-                                    block.instructions[i - 1] = Lw(dst, offset + int, base);
-                                }
-                            }
-                            Sw(dst, int, addr) => {
-                                if addr == address {
-                                    block.instructions[i] = Nop;
-                                    block.instructions[i - 1] = Sw(dst, offset + int, base);
-                                }
-                            }
-                            _ => {}
+                    }
+                    Sw(dst, int, addr) => {
+                        if addr == address {
+                            block.instructions[i] = Nop;
+                            block.instructions[i - 1] = Sw(dst, offset + int, base);
                         }
                     }
                     _ => {}
@@ -107,61 +94,45 @@ impl RiscvFunction {
             for i in (1..num).rev() {
                 match block.instructions[i] {
                     Beqz(cond, ref label) => match block.instructions[i - 1] {
-                        Snez(dst, src) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Beqz(src, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Snez(dst, src) if dst == cond => {
+                            block.instructions[i - 1] = Beqz(src, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Seqz(dst, src) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Bnez(src, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Seqz(dst, src) if dst == cond => {
+                            block.instructions[i - 1] = Bnez(src, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Bexp(Bop::Slt, dst, a, b) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Bge(a, b, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Bexp(Bop::Slt, dst, a, b) if dst == cond => {
+                            block.instructions[i - 1] = Bge(a, b, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Bexp(Bop::Xor | Bop::Sub, dst, a, b) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Beq(a, b, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Bexp(Bop::Xor | Bop::Sub, dst, a, b) if dst == cond => {
+                            block.instructions[i - 1] = Beq(a, b, label.clone());
+                            block.instructions[i] = Nop;
                         }
                         _ => {}
                     },
                     Bnez(cond, ref label) => match block.instructions[i - 1] {
-                        Snez(dst, src) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Bnez(src, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Snez(dst, src) if dst == cond => {
+                            block.instructions[i - 1] = Bnez(src, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Seqz(dst, src) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Beqz(src, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Seqz(dst, src) if dst == cond => {
+                            block.instructions[i - 1] = Beqz(src, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Bexp(Bop::Slt, dst, a, b) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Blt(a, b, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Bexp(Bop::Slt, dst, a, b) if dst == cond => {
+                            block.instructions[i - 1] = Blt(a, b, label.clone());
+                            block.instructions[i] = Nop;
                         }
-                        Bexp(Bop::Xor | Bop::Sub, dst, a, b) => {
-                            if dst == cond {
-                                block.instructions[i - 1] = Bne(a, b, label.clone());
-                                block.instructions[i] = Nop;
-                            }
+                        Bexp(Bop::Xor | Bop::Sub, dst, a, b) if dst == cond => {
+                            block.instructions[i - 1] = Bne(a, b, label.clone());
+                            block.instructions[i] = Nop;
                         }
                         _ => {}
                     },
                     _ => {}
-                }
+                };
             }
             block.clear_nop();
         }
@@ -180,26 +151,20 @@ impl RiscvFunction {
                         continue;
                     }
                     match block.instructions[i - 1] {
-                        Bexpi(op, d, a, b) => {
-                            if d == src {
-                                block.instructions[i - 1] = Nop;
-                                block.instructions[i] = Bexpi(op, dst, a, b);
-                            }
+                        Bexpi(op, d, a, b) if d == src => {
+                            block.instructions[i - 1] = Nop;
+                            block.instructions[i] = Bexpi(op, dst, a, b);
                         }
-                        Bexp(op, d, a, b) => {
-                            if d == src {
-                                block.instructions[i - 1] = Nop;
-                                block.instructions[i] = Bexp(op, dst, a, b);
-                            }
+                        Bexp(op, d, a, b) if d == src => {
+                            block.instructions[i - 1] = Nop;
+                            block.instructions[i] = Bexp(op, dst, a, b);
                         }
-                        Lw(d, a, b) => {
-                            if d == src {
-                                block.instructions[i - 1] = Nop;
-                                block.instructions[i] = Lw(dst, a, b);
-                            }
+                        Lw(d, a, b) if d == src => {
+                            block.instructions[i - 1] = Nop;
+                            block.instructions[i] = Lw(dst, a, b);
                         }
                         _ => {}
-                    }
+                    };
                 }
             }
             block.clear_nop();
@@ -217,32 +182,26 @@ impl RiscvFunction {
                 if let Li(reg, value) = block.instructions[i] {
                     let clear = !RegGroup::VAR.contains(&reg);
                     match block.instructions[i + 1] {
-                        Bexp(op, d, a, b) => {
-                            if b == reg {
-                                if clear {
-                                    block.instructions[i] = Nop;
-                                }
-                                block.instructions[i + 1] = Bexpi(op, d, a, value);
+                        Bexp(op, d, a, b) if b == reg => {
+                            if clear {
+                                block.instructions[i] = Nop;
                             }
+                            block.instructions[i + 1] = Bexpi(op, d, a, value);
                         }
-                        Bexpi(Bop::Mul, d, a, b) => {
-                            if a == reg {
-                                if clear {
-                                    block.instructions[i] = Nop;
-                                }
-                                block.instructions[i + 1] = Li(d, value * b);
+                        Bexpi(Bop::Mul, d, a, b) if a == reg => {
+                            if clear {
+                                block.instructions[i] = Nop;
                             }
+                            block.instructions[i + 1] = Li(d, value * b);
                         }
-                        Mv(d, s) => {
-                            if s == reg {
-                                if clear {
-                                    block.instructions[i] = Nop;
-                                }
-                                block.instructions[i + 1] = Li(d, value);
+                        Mv(d, s) if s == reg => {
+                            if clear {
+                                block.instructions[i] = Nop;
                             }
+                            block.instructions[i + 1] = Li(d, value);
                         }
                         _ => {}
-                    }
+                    };
                 }
             }
             block.clear_nop();
