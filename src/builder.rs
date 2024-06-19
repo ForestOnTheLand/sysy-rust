@@ -75,27 +75,20 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
     }
 }
 
-/// Write a **global** [`GlobalDecl`] into a program,
-/// with functions [`build_global_const_decl`], [`build_global_var_decl`] used.
+/// Write a **global** [`Decl`] into a program,
+/// with functions [`build_global_const_def`], [`build_global_var_def`] used.
 fn build_global_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
-    if decl.mutable {
-        build_global_var_decl(program, decl, symtab)
-    } else {
-        build_global_const_decl(program, decl, symtab)
-    }
-}
-
-/// Write a **global** [`ConstDecl`] into a program,
-/// with function [`build_global_const_def`] used.
-fn build_global_const_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
-    assert_eq!(decl.btype, BuiltinType::Int);
+    assert_eq!(decl.btype, BuiltinType::Int, "Invalid global value type");
     for def in decl.defs.iter() {
-        build_global_const_def(program, def, symtab);
+        if decl.mutable {
+            build_global_var_def(program, def, symtab);
+        } else {
+            build_global_const_def(program, def, symtab);
+        }
     }
 }
 
-/// Write a **global** [`ConstDef`] into a program,
-/// with function [`compute_init_value`] used.
+/// Write a **const** **global** [`Def`] into a program.
 fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data = def.init.as_ref().expect("expected an initial value");
@@ -104,7 +97,11 @@ fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolT
     if shape.is_empty() {
         symtab.insert_const(def.ident.clone(), data[0]);
     } else {
-        let value = global_packing(program, &data, &shape);
+        let data = data
+            .into_iter()
+            .map(|i| program.new_value().integer(i))
+            .collect();
+        let value = packing(|e| program.new_value().aggregate(e), data, &shape);
         let array = program.new_value().global_alloc(value);
         program.set_value_name(array, Some(format!("@{}", def.ident)));
         let ty = program.borrow_value(array).ty().clone();
@@ -112,17 +109,7 @@ fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolT
     }
 }
 
-/// Write a **global** [`GlobalVarDecl`] into a program,
-/// with function [`build_global_var_def`] used.
-fn build_global_var_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
-    assert_eq!(decl.btype, BuiltinType::Int);
-    for def in decl.defs.iter() {
-        build_global_var_def(program, def, symtab);
-    }
-}
-
-/// Write a **global** [`GlobalVarDef`] into a program,
-/// with function [`build_global_var_def`] used.
+/// Write a **global** [`Def`] into a program.
 fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data: Value = match &def.init {
@@ -131,7 +118,11 @@ fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTab
             if shape.is_empty() {
                 program.new_value().integer(elems[0])
             } else {
-                global_packing(program, &elems, &shape)
+                let data = elems
+                    .into_iter()
+                    .map(|i| program.new_value().integer(i))
+                    .collect();
+                packing(|e| program.new_value().aggregate(e), data, &shape)
             }
         }
         None => program.new_value().zero_init(get_array_type(&shape)),
@@ -159,14 +150,13 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
 
     let bb = build_block(func_data, bb, &func_def.block, symtab);
     if !is_unused_block(func_data, bb) {
-        if ret.is_unit() {
-            let ret = new_value!(func_data).ret(None);
-            add_value(func_data, bb, ret);
+        let ret = if ret.is_unit() {
+            new_value!(func_data).ret(None)
         } else {
             let zero = new_value!(func_data).integer(0);
-            let ret = new_value!(func_data).ret(Some(zero));
-            add_value(func_data, bb, ret);
-        }
+            new_value!(func_data).ret(Some(zero))
+        };
+        add_value(func_data, bb, ret);
     }
     symtab.quit_block();
 }
@@ -308,7 +298,7 @@ fn build_var_def(
     symtab.insert_var(def.ident.clone(), var, ty);
     if let Some(init_value) = &def.init {
         let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
-        let value = local_packing(func, values, &shape);
+        let value = packing(|e| new_value!(func).aggregate(e), values, &shape);
         let store = new_value!(func).store(value, var);
         add_value(func, bb, store);
         bb
@@ -341,7 +331,7 @@ fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &
         symtab.insert_const(def.ident.clone(), data[0]);
     } else {
         let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
-        let value = local_packing(func, values, &shape);
+        let value = packing(|elems| new_value!(func).aggregate(elems), values, &shape);
         let ty = func.dfg().value(value).ty().clone();
         let array = new_value!(func).alloc(ty);
         add_value(func, bb, array);
@@ -703,28 +693,10 @@ fn get_subshape(shape: &Vec<usize>, offset: usize) -> Vec<usize> {
     shape[index..].to_vec()
 }
 
-fn global_packing(program: &mut Program, data: &Vec<i32>, shape: &Vec<usize>) -> Value {
-    assert_eq!(data.len(), shape.iter().product());
-    let mut data: Vec<Value> = data
-        .iter()
-        .map(|&i| program.new_value().integer(i))
-        .collect();
-    for &length in shape.iter().rev() {
-        let mut next_data = Vec::new();
-        let mut pack = Vec::new();
-        for value in data {
-            pack.push(value);
-            if pack.len() == length {
-                next_data.push(program.new_value().aggregate(pack));
-                pack = Vec::new();
-            }
-        }
-        data = next_data
-    }
-    data[0]
-}
-
-fn local_packing(func: &mut FunctionData, data: Vec<Value>, shape: &Vec<usize>) -> Value {
+fn packing<F>(mut packer: F, data: Vec<Value>, shape: &Vec<usize>) -> Value
+where
+    F: FnMut(Vec<Value>) -> Value,
+{
     assert_eq!(data.len(), shape.iter().product());
     let mut data = data;
     for &length in shape.iter().rev() {
@@ -733,7 +705,7 @@ fn local_packing(func: &mut FunctionData, data: Vec<Value>, shape: &Vec<usize>) 
         for value in data {
             pack.push(value);
             if pack.len() == length {
-                next_data.push(new_value!(func).aggregate(pack));
+                next_data.push(packer(pack));
                 pack = Vec::new();
             }
         }
