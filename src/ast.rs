@@ -24,31 +24,8 @@ pub struct CompUnit {
 /// [`GlobalItem`] `::=` [`GlobalDecl`] | [`FuncDef`]
 #[derive(Debug)]
 pub enum GlobalItem {
-    Decl(Box<GlobalDecl>),
+    Decl(Box<Decl>),
     FuncDef(Box<FuncDef>),
-}
-
-/// [`GlobalDecl`] `::=` [`ConstDecl`] | [`GlobalVarDecl`]
-#[derive(Debug)]
-pub enum GlobalDecl {
-    Const(Box<ConstDecl>),
-    Var(Box<GlobalVarDecl>),
-}
-
-/// [`GlobalVarDecl`] `::=` [`BuiltinType`] [`GlobalVarDef`] {`","` [`GlobalVarDef`]} `";"`
-#[derive(Debug)]
-pub struct GlobalVarDecl {
-    pub btype: BuiltinType,
-    pub var_defs: Vec<Box<GlobalVarDef>>,
-}
-
-/// [`GlobalVarDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`}
-///                     | `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`ConstInitVal`]
-#[derive(Debug)]
-pub struct GlobalVarDef {
-    pub ident: String,
-    pub shape: Vec<Box<ConstExp>>,
-    pub init_val: Option<Box<ConstInitVal>>,
 }
 
 /// [`FuncDef`] `::=` [`BuiltinType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]
@@ -66,12 +43,12 @@ pub struct FuncFParams {
     pub params: Vec<Box<FuncFParam>>,
 }
 
-/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" ConstExp "]"}]
+/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" [`Exp`] "]"}]
 #[derive(Debug)]
 pub struct FuncFParam {
     pub btype: BuiltinType,
     pub ident: String,
-    pub shape: Option<Vec<Box<ConstExp>>>,
+    pub shape: Option<Vec<Box<Exp>>>,
 }
 
 /// [`Block`] `::=` `"{"` {[`BlockItem`]} `"}"`
@@ -114,19 +91,19 @@ pub enum Decl {
     Var(Box<VarDecl>),
 }
 
-/// [`VarDecl`] `::=` [`BuiltinType`] [`VarDef`] {`","` [`VarDef`]} `""`
+/// [`VarDecl`] `::=` [`BuiltinType`] [`Def`] {`","` [`Def`]} `""`
 #[derive(Debug)]
 pub struct VarDecl {
     pub btype: BuiltinType,
-    pub var_defs: Vec<Box<VarDef>>,
+    pub var_defs: Vec<Box<Def>>,
 }
 
-/// [`VarDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`}
-///               | `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`InitVal`]
+/// [`Def`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
+///               | `IDENT` {`"["` [`Exp`] `"]"`} `"="` [`InitVal`]
 #[derive(Debug)]
-pub struct VarDef {
+pub struct Def {
     pub ident: String,
-    pub shape: Vec<Box<ConstExp>>,
+    pub shape: Vec<Box<Exp>>,
     pub init_val: Option<Box<InitVal>>,
 }
 
@@ -137,31 +114,11 @@ pub enum InitVal {
     Array(Vec<Box<InitVal>>),
 }
 
-/// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`ConstDef`] {`","` [`ConstDef`]} ``";"``
+/// [`ConstDecl`] `::=` `"const"` [`BuiltinType`] [`Def`] {`","` [`Def`]} ``";"``
 #[derive(Debug)]
 pub struct ConstDecl {
     pub btype: BuiltinType,
-    pub const_defs: Vec<Box<ConstDef>>,
-}
-
-// #[derive(Debug)]
-// pub enum BuiltinType {
-//     Int,
-// }
-
-/// [`ConstDef`] `::=` `IDENT` {`"["` [`ConstExp`] `"]"`} `"="` [`ConstInitVal`]
-#[derive(Debug)]
-pub struct ConstDef {
-    pub ident: String,
-    pub shape: Vec<Box<ConstExp>>,
-    pub const_init_val: Box<ConstInitVal>,
-}
-
-/// [`ConstInitVal`] `::=` [`ConstExp`] | "{" [[`ConstExp`] {"," [`ConstExp`]}] "}"
-#[derive(Debug)]
-pub enum ConstInitVal {
-    Single(Box<ConstExp>),
-    Array(Vec<Box<ConstInitVal>>),
+    pub const_defs: Vec<Box<Def>>,
 }
 
 /// [`LVal`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
@@ -171,13 +128,11 @@ pub struct LVal {
     pub index: Vec<Box<Exp>>,
 }
 
-/// [`ConstExp`] `::=` [`Exp`]
-#[derive(Debug)]
-pub struct ConstExp {
-    pub exp: Box<Exp>,
-}
-
-/// [`Exp`] `::=` [`UnaryExp`]
+/// [`Exp`] `::=` [`LVal`]
+///       | [`i32`]
+///       | [`Exp`] [`BinaryOperator`] [`Exp`]
+///       | [`UnaryOperator`] [`Exp`]
+///       | `IDENT` `"("` [`FuncRParams`] `")"`
 #[derive(Debug)]
 pub enum Exp {
     LVal(LVal),
@@ -187,7 +142,7 @@ pub enum Exp {
     Call(String, Option<Box<FuncRParams>>),
 }
 
-/// [`FuncRParams`] ::= [`Exp`] {"," [`Exp`]};
+/// [`FuncRParams`] ::= [`Exp`] {`","` [`Exp`]};
 #[derive(Debug)]
 pub struct FuncRParams {
     pub exps: Vec<Box<Exp>>,

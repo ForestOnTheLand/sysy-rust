@@ -77,10 +77,10 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
 
 /// Write a **global** [`GlobalDecl`] into a program,
 /// with functions [`build_global_const_decl`], [`build_global_var_decl`] used.
-fn build_global_decl(program: &mut Program, decl: &GlobalDecl, symtab: &mut SymbolTable) {
+fn build_global_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
     match decl {
-        GlobalDecl::Const(decl) => build_global_const_decl(program, decl, symtab),
-        GlobalDecl::Var(decl) => build_global_var_decl(program, decl, symtab),
+        Decl::Const(decl) => build_global_const_decl(program, decl, symtab),
+        Decl::Var(decl) => build_global_var_decl(program, decl, symtab),
     };
 }
 
@@ -95,9 +95,10 @@ fn build_global_const_decl(program: &mut Program, decl: &ConstDecl, symtab: &mut
 
 /// Write a **global** [`ConstDef`] into a program,
 /// with function [`compute_init_value`] used.
-fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut SymbolTable) {
+fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
-    let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
+    let data = def.init_val.as_ref().expect("expected an initial value");
+    let data = compute_init_value(data, shape.clone(), symtab);
 
     if shape.is_empty() {
         symtab.insert_const(def.ident.clone(), data[0]);
@@ -112,7 +113,7 @@ fn build_global_const_def(program: &mut Program, def: &ConstDef, symtab: &mut Sy
 
 /// Write a **global** [`GlobalVarDecl`] into a program,
 /// with function [`build_global_var_def`] used.
-fn build_global_var_decl(program: &mut Program, decl: &GlobalVarDecl, symtab: &mut SymbolTable) {
+fn build_global_var_decl(program: &mut Program, decl: &VarDecl, symtab: &mut SymbolTable) {
     assert_eq!(decl.btype, BuiltinType::Int);
     for def in decl.var_defs.iter() {
         build_global_var_def(program, def, symtab);
@@ -121,7 +122,7 @@ fn build_global_var_decl(program: &mut Program, decl: &GlobalVarDecl, symtab: &m
 
 /// Write a **global** [`GlobalVarDef`] into a program,
 /// with function [`build_global_var_def`] used.
-fn build_global_var_def(program: &mut Program, def: &GlobalVarDef, symtab: &mut SymbolTable) {
+fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data: Value = match &def.init_val {
         Some(init_val) => {
@@ -290,7 +291,7 @@ fn build_var_decl(
 fn build_var_def(
     func: &mut FunctionData,
     bb: BasicBlock,
-    def: &VarDef,
+    def: &Def,
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
     if is_unused_block(func, bb) {
@@ -327,18 +328,14 @@ fn build_const_decl(
     }
 }
 
-fn build_const_def(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    def: &ConstDef,
-    symtab: &mut SymbolTable,
-) {
+fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &mut SymbolTable) {
     let shape: Vec<usize> = def
         .shape
         .iter()
-        .map(|exp| compute_const_exp(exp, symtab) as usize)
+        .map(|exp| compute_exp(exp, symtab) as usize)
         .collect();
-    let data = compute_init_value(&def.const_init_val, shape.clone(), symtab);
+    let data = def.init_val.as_ref().expect("expected an initial value");
+    let data = compute_init_value(data, shape.clone(), symtab);
 
     if shape.is_empty() {
         symtab.insert_const(def.ident.clone(), data[0]);
@@ -355,10 +352,6 @@ fn build_const_def(
         let ty = func.dfg().value(array).ty().clone();
         symtab.insert_var(def.ident.clone(), array, ty);
     }
-}
-
-fn compute_const_exp(exp: &ConstExp, symtab: &SymbolTable) -> i32 {
-    compute_exp(&exp.exp, symtab)
 }
 
 fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
@@ -753,20 +746,20 @@ fn local_packing(func: &mut FunctionData, data: Vec<Value>, shape: &Vec<usize>) 
     data[0]
 }
 
-fn compute_init_value(init: &ConstInitVal, shape: Vec<usize>, symtab: &SymbolTable) -> Vec<i32> {
+fn compute_init_value(init: &InitVal, shape: Vec<usize>, symtab: &SymbolTable) -> Vec<i32> {
     fn _compute_init_value(
-        init: &ConstInitVal,
+        init: &InitVal,
         shape: &Vec<usize>,
         symtab: &SymbolTable,
         data: &mut Vec<i32>,
         offset: usize,
     ) -> usize {
         match init {
-            ConstInitVal::Single(exp) => {
-                data[offset] = compute_const_exp(exp, symtab);
+            InitVal::Single(exp) => {
+                data[offset] = compute_exp(exp, symtab);
                 offset + 1
             }
-            ConstInitVal::Array(exps) => {
+            InitVal::Array(exps) => {
                 let s = get_subshape(&shape, offset);
                 let end_offset = offset + s.iter().product::<usize>();
                 let mut offset = offset;
@@ -782,10 +775,10 @@ fn compute_init_value(init: &ConstInitVal, shape: Vec<usize>, symtab: &SymbolTab
     let mut data = Vec::new();
     data.resize(size, 0);
     match init {
-        ConstInitVal::Single(exp) => {
-            data[0] = compute_const_exp(exp, symtab);
+        InitVal::Single(exp) => {
+            data[0] = compute_exp(exp, symtab);
         }
-        ConstInitVal::Array(exps) => {
+        InitVal::Array(exps) => {
             let mut offset = 0;
             for exp in exps.iter() {
                 offset = _compute_init_value(exp, &shape, symtab, &mut data, offset);
@@ -864,10 +857,10 @@ fn get_array_type(shape: &Vec<usize>) -> Type {
     ty
 }
 
-fn compute_shape(shape: &Vec<Box<ConstExp>>, symtab: &SymbolTable) -> Vec<usize> {
+fn compute_shape(shape: &Vec<Box<Exp>>, symtab: &SymbolTable) -> Vec<usize> {
     shape
         .iter()
-        .map(|e| compute_const_exp(e, symtab) as usize)
+        .map(|e| compute_exp(e, symtab) as usize)
         .collect()
 }
 

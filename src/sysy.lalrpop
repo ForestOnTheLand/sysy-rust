@@ -18,56 +18,38 @@ Comma<T>: Vec<T> = <mut v: (<T> ",")*> <e: T> => {
     v
 };
 
-// CompUnit ::= (Decl | FuncDef) [CompUnit];
+// CompUnit ::= {GlobalItem}
 pub CompUnit: Box<CompUnit> = {
     <items: (<GlobalItem>)*> => Box::new(CompUnit { <> }),
 }
 
+// GlobalItem ::= FuncDef | Decl
 GlobalItem: Box<GlobalItem> = {
     <FuncDef> => Box::new(GlobalItem::FuncDef( <> )),
-    <GlobalDecl> => Box::new(GlobalItem::Decl( <> )),
+    <Decl> => Box::new(GlobalItem::Decl( <> )),
 }
 
-GlobalDecl: Box<GlobalDecl> = {
-    <ConstDecl> => Box::new(GlobalDecl::Const( <> )),
-    <GlobalVarDecl> => Box::new(GlobalDecl::Var( <> )),
-}
-
-GlobalVarDecl: Box<GlobalVarDecl> = {
-    <btype: BuiltinType> <var_defs: Comma<GlobalVarDef>> ";" => Box::new(GlobalVarDecl { <> }),
-}
-
-GlobalVarDef: Box<GlobalVarDef> = {
-    <ident: Ident> <shape: ("[" <ConstExp> "]")*> <init_val: ("=" <ConstInitVal>)?> => Box::new(GlobalVarDef { <> }),
-}
-
-// FuncDef     ::= BuiltinType IDENT "(" [FuncFParams] ")" Block;
+// FuncDef ::= BuiltinType IDENT "(" [FuncFParams] ")" Block
 FuncDef: Box<FuncDef> = {
     <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => {
         Box::new(FuncDef { <> })
     }
 }
 
-// BuiltinType    ::= "void" | "int";
-BuiltinType: BuiltinType = {
-    "void" => BuiltinType::Void,
-    "int" => BuiltinType::Int,
-}
-
 // FuncFParams ::= FuncFParam {"," FuncFParam}
 FuncFParams: Box<FuncFParams> = <params: Comma<FuncFParam>> => Box::new(FuncFParams{ <> });
 
-// FuncFParam  ::= BuiltinType IDENT ["[" "]" {"[" ConstExp "]"}];
+// FuncFParam  ::= BuiltinType IDENT ["[" "]" {"[" Exp "]"}]
 FuncFParam: Box<FuncFParam> = {
     <btype: BuiltinType> <ident: Ident> => Box::new(FuncFParam { btype, ident, shape: None }),
-    <btype: BuiltinType> <ident: Ident> "[" "]" <shape: ("[" <ConstExp> "]")*> =>
+    <btype: BuiltinType> <ident: Ident> "[" "]" <shape: ("[" <Exp> "]")*> =>
         Box::new(FuncFParam{ btype, ident, shape: Some(shape) }),
 }
 
-// Block ::= "{" {BlockItem} "}";
+// Block ::= "{" {BlockItem} "}"
 Block: Block = "{" <block_items: BlockItem*> "}" => Block { <> };
 
-// BlockItem ::= Decl | Stmt;
+// BlockItem ::= Decl | Stmt
 BlockItem: Box<BlockItem> = {
     Decl => Box::new(BlockItem::Decl( <> )),
     Stmt => Box::new(BlockItem::Stmt( <> )),
@@ -78,12 +60,13 @@ BlockItem: Box<BlockItem> = {
 //        | Block
 //        | "if" "(" Exp ")" Stmt ["else" Stmt]
 //        | "while" "(" Exp ")" Stmt
-//        | "return" [Exp] ";";
+//        | "return" [Exp] ";"
 Stmt: Box<Stmt> = {
     MatchedStmt => <>,
     OpenStmt => <>,
 }
 
+// Something that would never match with other following "else"
 MatchedStmt: Box<Stmt> = {
     <LVal> "=" <Exp> ";" => Box::new(Stmt::Assign( <> )),
     <Exp?> ";" => Box::new(Stmt::Exp( <> )),
@@ -95,59 +78,49 @@ MatchedStmt: Box<Stmt> = {
     "return" <exp: Exp?> ";" => Box::new(Stmt::Return( <> )), 
 }
 
-// Something that should have no trailing "else"
+// Something that could probably match with other trailing "else"
 OpenStmt: Box<Stmt> = {
     "if" "(" <exp: Exp> ")" <s1: MatchedStmt> "else" <s2: OpenStmt> => Box::new(Stmt::Condition(exp, s1, Some(s2))),
     "if" "(" <exp: Exp> ")" <s1: Stmt> => Box::new(Stmt::Condition(exp, s1, None)),
     "while" "(" <Exp> ")" <OpenStmt> => Box::new(Stmt::While( <> )),
 }
 
-// Decl ::= ConstDecl | VarDecl;
+// Decl ::= ConstDecl | VarDecl
 Decl: Box<Decl> = {
     ConstDecl => Box::new(Decl::Const( <> )),
     VarDecl => Box::new(Decl::Var( <> )),
 }
-// VarDecl ::= BuiltinType VarDef {"," VarDef} ";";
-VarDecl: Box<VarDecl> = <btype: BuiltinType> <var_defs: Comma<VarDef>> ";" => Box::new(VarDecl { <> });
-// VarDef ::= IDENT ["[" ConstExp "]"] | IDENT ["[" ConstExp "]"] "=" InitVal;
-VarDef: Box<VarDef> = {
-    <ident: Ident> <shape: ("[" <ConstExp> "]")*> <init_val: ("=" <InitVal>)?> => Box::new(VarDef { <> }),
+
+// VarDecl ::= BuiltinType Def {"," Def} ";"
+VarDecl: Box<VarDecl> = <btype: BuiltinType> <var_defs: Comma<Def>> ";" => Box::new(VarDecl { <> });
+
+// Def ::= IDENT ["[" Exp "]"] | IDENT ["[" Exp "]"] "=" InitVal
+Def: Box<Def> = {
+    <ident: Ident> <shape: ("[" <Exp> "]")*> <init_val: ("=" <InitVal>)?> => Box::new(Def { <> }),
 }
-// InitVal ::= Exp | "{" [Exp {"," Exp}] "}";
+
+// InitVal ::= Exp | "{" [Exp {"," Exp}] "}"
 InitVal: Box<InitVal> = {
     <Exp> => Box::new(InitVal::Single( <> )),
     "{" <exp: (<Comma<InitVal>>)?> "}" => Box::new(InitVal::Array( exp.unwrap_or(Vec::new()) )),
 }
 
-// ConstDecl ::= "const" BuiltinType ConstDef {"," ConstDef} ";";
-ConstDecl: Box<ConstDecl> = "const" <btype: BuiltinType> <const_defs: Comma<ConstDef>> ";" => Box::new(ConstDecl { <> });
+// ConstDecl ::= "const" BuiltinType Def {"," Def} ";"
+ConstDecl: Box<ConstDecl> = "const" <btype: BuiltinType> <const_defs: Comma<Def>> ";" => Box::new(ConstDecl { <> });
 
-// ConstDef ::= IDENT {"[" ConstExp "]"} "=" ConstInitVal;
-ConstDef: Box<ConstDef> = <ident: Ident> <shape: ("[" <ConstExp> "]")*> "=" <const_init_val: ConstInitVal> => Box::new(ConstDef { <> });
-// ConstInitVal ::= ConstExp | "{" [ConstInitVal {"," ConstInitVal}] "}";
-ConstInitVal: Box<ConstInitVal> = {
-    <const_exp: ConstExp> => Box::new(ConstInitVal::Single( <> )),
-    "{" <exps: (<Comma<ConstInitVal>>)?> "}" => Box::new(ConstInitVal::Array( exps.unwrap_or(Vec::new()) )),
-}
-
-// LVal ::= IDENT ["[" Exp "]"];
+// LVal ::= IDENT ["[" Exp "]"]
 LVal: LVal = {
     <ident: Ident> <index: ("[" <Exp> "]")*> => LVal{ <> },
 }
-
-// ConstExp ::= Exp;
-ConstExp: Box<ConstExp> = <exp: Exp> => Box::new(ConstExp { <> });
-
-// Exp ::= LOrExp;
+// Exp ::= LOrExp
 Exp: Box<Exp> = <lor_exp: LOrExp> => <>;
-// PrimaryExp ::= "(" Exp ")" | LVal | Number;
+// PrimaryExp ::= "(" Exp ")" | LVal | Number
 PrimaryExp: Box<Exp> = {
     "(" <Exp> ")" => <>,
     <LVal> => Box::new(Exp::LVal( <> )),
     <Number> => Box::new(Exp::Number( <> )),
 }
-
-// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp | IDENT "(" [FuncRParams] ")";
+// UnaryExp ::= PrimaryExp | UnaryOp UnaryExp | IDENT "(" [FuncRParams] ")"
 UnaryExp: Box<Exp> = {
     <PrimaryExp> => <>,
     <UnaryOperator> <UnaryExp> => Box::new(Exp::Unary( <> )),
@@ -155,26 +128,26 @@ UnaryExp: Box<Exp> = {
 }
 // FuncRParams ::= Exp {"," Exp}
 FuncRParams: Box<FuncRParams> = <exps: Comma<Exp>> => Box::new(FuncRParams { <> });
-// UnaryOp ::= "+" | "-" | "!";
+// UnaryOp ::= "+" | "-" | "!"
 UnaryOperator: UnaryOperator = {
     "+" => UnaryOperator::Pos,
     "-" => UnaryOperator::Neg,
     "!" => UnaryOperator::Not,
 }
-// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp;
+// MulExp ::= UnaryExp | MulExp ("*" | "/" | "%") UnaryExp
 MulExp: Box<Exp> = {
     <UnaryExp> => <>,
     <left: MulExp> "*" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mul, right)),
     <left: MulExp> "/" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Div, right)),
     <left: MulExp> "%" <right: UnaryExp> => Box::new(Exp::Binary(left, BinaryOperator::Mod, right)),
 }
-// AddExp ::= MulExp | AddExp ("+" | "-") MulExp;
+// AddExp ::= MulExp | AddExp ("+" | "-") MulExp
 AddExp: Box<Exp> = {
     <MulExp> => <>,
     <left: AddExp> "+" <right: MulExp> => Box::new(Exp::Binary(left, BinaryOperator::Add, right)),
     <left: AddExp> "-" <right: MulExp> => Box::new(Exp::Binary(left, BinaryOperator::Sub, right)),
 }
-// RelExp ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp;
+// RelExp ::= AddExp | RelExp ("<" | ">" | "<=" | ">=") AddExp
 RelExp: Box<Exp> = {
     <AddExp> => <>,
     <left: RelExp> "<" <right: AddExp> => Box::new(Exp::Binary(left, BinaryOperator::Lt, right)),
@@ -182,21 +155,27 @@ RelExp: Box<Exp> = {
     <left: RelExp> "<=" <right: AddExp> => Box::new(Exp::Binary(left, BinaryOperator::Le, right)),
     <left: RelExp> ">=" <right: AddExp> => Box::new(Exp::Binary(left, BinaryOperator::Ge, right)),
 }
-// EqExp ::= RelExp | EqExp ("==" | "!=") RelExp;
+// EqExp ::= RelExp | EqExp ("==" | "!=") RelExp
 EqExp: Box<Exp> = {
     <RelExp> => <>,
     <left: EqExp> "==" <right: RelExp> => Box::new(Exp::Binary(left, BinaryOperator::Eq, right)),
     <left: EqExp> "!=" <right: RelExp> => Box::new(Exp::Binary(left, BinaryOperator::NotEq, right)),
 }
-// LAndExp ::= EqExp | LAndExp "&&" EqExp;
+// LAndExp ::= EqExp | LAndExp "&&" EqExp
 LAndExp: Box<Exp> = {
     <EqExp> => <>,
     <left: LAndExp> "&&" <right: EqExp> => Box::new(Exp::Binary(left, BinaryOperator::And, right)),
 }
-// LOrExp ::= LAndExp | LOrExp "||" LAndExp;
+// LOrExp ::= LAndExp | LOrExp "||" LAndExp
 LOrExp: Box<Exp> = {
     <LAndExp> => <>,
     <left: LOrExp> "||" <right: LAndExp> => Box::new(Exp::Binary(left, BinaryOperator::Or, right)),
+}
+
+// BuiltinType ::= "void" | "int"
+BuiltinType: BuiltinType = {
+    "void" => BuiltinType::Void,
+    "int" => BuiltinType::Int,
 }
 
 Number: i32 = <num: IntConst> => <>;
