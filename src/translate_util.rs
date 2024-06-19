@@ -59,7 +59,7 @@ impl fmt::Display for Register {
 #[derive(Debug)]
 pub struct RegGroup {
     list: &'static [Register],
-    state: [bool; 32],
+    state: u32,
 }
 
 impl RegGroup {
@@ -70,14 +70,14 @@ impl RegGroup {
     pub fn new_temp() -> Self {
         Self {
             list: &Self::TEMP,
-            state: [false; 32],
+            state: 0,
         }
     }
 
     pub fn new_store() -> Self {
         Self {
             list: &Self::STORE,
-            state: [false; 32],
+            state: 0,
         }
     }
 
@@ -87,8 +87,8 @@ impl RegGroup {
 
     pub fn get_vaccant(&mut self) -> Register {
         for reg in self.list.iter() {
-            if !self.state[reg.0 as usize] {
-                self.state[reg.0 as usize] = true;
+            if (self.state & (1 << reg.0)) == 0 {
+                self.state |= 1 << reg.0;
                 return *reg;
             }
         }
@@ -99,8 +99,8 @@ impl RegGroup {
         if !self.list.contains(&reg) {
             return;
         }
-        if self.state[reg.0 as usize] {
-            self.state[reg.0 as usize] = false;
+        if (self.state & (1 << reg.0)) != 0 {
+            self.state &= !(1 << reg.0);
         } else {
             panic!("register {reg} is not being occupied now");
         }

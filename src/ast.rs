@@ -9,7 +9,7 @@
 //!
 
 /// [`BuiltinType`] `::=` `"void"` | `"int"`
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BuiltinType {
     Void,
     Int,
@@ -28,19 +28,13 @@ pub enum GlobalItem {
     FuncDef(Box<FuncDef>),
 }
 
-/// [`FuncDef`] `::=` [`BuiltinType`] `IDENT` `"("` [[`FuncFParams`]] `")"` [`Block`]
+/// [`FuncDef`] `::=` [`BuiltinType`] `IDENT` `"("` {[`FuncFParam`]} `")"` [`Block`]
 #[derive(Debug)]
 pub struct FuncDef {
     pub func_type: BuiltinType,
     pub ident: String,
-    pub params: Option<Box<FuncFParams>>,
-    pub block: Block,
-}
-
-/// [`FuncFParams`] ::= [`FuncFParam`] {`","` [`FuncFParam`]}
-#[derive(Debug)]
-pub struct FuncFParams {
     pub params: Vec<Box<FuncFParam>>,
+    pub block: Option<Block>,
 }
 
 /// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" [`Exp`] "]"}]
@@ -119,7 +113,7 @@ pub struct LVal {
 ///       | [`i32`]
 ///       | [`Exp`] [`BinaryOperator`] [`Exp`]
 ///       | [`UnaryOperator`] [`Exp`]
-///       | `IDENT` `"("` [`FuncRParams`] `")"`
+///       | `IDENT` `"("` {[`Exp`] }`")"`
 #[derive(Debug)]
 pub enum Exp {
     LVal(LVal),
@@ -127,12 +121,6 @@ pub enum Exp {
     Binary(Box<Exp>, BinaryOperator, Box<Exp>),
     Unary(UnaryOperator, Box<Exp>),
     Call(String, Vec<Box<Exp>>),
-}
-
-/// [`FuncRParams`] ::= [`Exp`] {`","` [`Exp`]};
-#[derive(Debug)]
-pub struct FuncRParams {
-    pub exps: Vec<Box<Exp>>,
 }
 
 /// [`UnaryOperator`] `::=` `"+"` | `"-"` | `"!"`

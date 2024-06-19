@@ -136,6 +136,19 @@ fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTab
 
 /// Write a [`FuncDef`] into a program.
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
+    if func_def.block.is_none() {
+        let name = &func_def.ident;
+        let params_ty = func_def
+            .params
+            .iter()
+            .map(|p| get_type(p.btype, &p.shape, symtab))
+            .collect();
+        let ret_ty = get_type(func_def.func_type, &None, symtab);
+        let data = FunctionData::new_decl(format!("@{name}"), params_ty, ret_ty);
+        let function = program.new_func(data);
+        symtab.insert_function(name.to_string(), function);
+        return;
+    }
     symtab.enter_block();
     let (func, ret) = parse_function(program, func_def, symtab);
     let func_data = program.func_mut(func);
@@ -144,11 +157,9 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
     let bb = new_bb(func_data, "%koopa_builtin_entry".into());
     add_bb(func_data, bb);
 
-    if let Some(params) = func_def.params.as_ref() {
-        build_params(func_data, bb, params, symtab);
-    }
+    build_params(func_data, bb, &func_def.params, symtab);
 
-    let bb = build_block(func_data, bb, &func_def.block, symtab);
+    let bb = build_block(func_data, bb, func_def.block.as_ref().unwrap(), symtab);
     if !is_unused_block(func_data, bb) {
         let ret = if ret.is_unit() {
             new_value!(func_data).ret(None)
@@ -181,19 +192,17 @@ fn parse_function(
 /// Returns a [`Vec`] containing the name and [`Type`] of each argument.
 fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>, Type)> {
     let mut params = Vec::new();
-    if let Some(p) = &func_def.params {
-        for param in p.params.iter() {
-            params.push((
-                Some(format!("@{}", param.ident)),
-                match &param.shape {
-                    None => Type::get_i32(),
-                    Some(shape) => {
-                        let shape = compute_shape(shape, symtab);
-                        Type::get_pointer(get_array_type(&shape))
-                    }
-                },
-            ))
-        }
+    for param in func_def.params.iter() {
+        params.push((
+            Some(format!("@{}", param.ident)),
+            match &param.shape {
+                None => Type::get_i32(),
+                Some(shape) => {
+                    let shape = compute_shape(shape, symtab);
+                    Type::get_pointer(get_array_type(&shape))
+                }
+            },
+        ))
     }
     params
 }
@@ -202,12 +211,12 @@ fn parse_params(func_def: &FuncDef, symtab: &SymbolTable) -> Vec<(Option<String>
 fn build_params(
     func: &mut FunctionData,
     bb: BasicBlock,
-    params: &FuncFParams,
+    params: &Vec<Box<FuncFParam>>,
     symtab: &mut SymbolTable,
 ) {
-    for i in 0..params.params.len() {
+    for (i, param) in params.iter().enumerate() {
         let value = func.params()[i];
-        let ident = format!("%{}", params.params[i].ident);
+        let ident = format!("%{}", param.ident);
         let ty = func.dfg().value(value).ty().clone();
         let p = new_value!(func).alloc(ty);
         func.dfg_mut().set_value_name(p, Some(ident.clone()));
@@ -215,7 +224,7 @@ fn build_params(
         let store = new_value!(func).store(value, p);
         add_value(func, bb, store);
         let ty = func.dfg().value(p).ty().clone();
-        symtab.insert_var(params.params[i].ident.clone(), p, ty);
+        symtab.insert_var(param.ident.clone(), p, ty);
     }
 }
 
@@ -836,5 +845,15 @@ fn get_integer(func: &FunctionData, val: Value) -> Option<i32> {
     match func.dfg().value(val).kind() {
         ValueKind::Integer(i) => Some(i.value()),
         _ => None,
+    }
+}
+
+fn get_type(btype: BuiltinType, shape: &Option<Vec<Box<Exp>>>, symtab: &SymbolTable) -> Type {
+    match btype {
+        BuiltinType::Void => Type::get_unit(),
+        BuiltinType::Int => match shape {
+            None => Type::get_i32(),
+            Some(shape) => Type::get_pointer(get_array_type(&compute_shape(shape, symtab))),
+        },
     }
 }

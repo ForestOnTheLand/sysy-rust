@@ -25,11 +25,15 @@ GlobalItem: Box<GlobalItem> = {
 }
 
 // FuncDef ::= BuiltinType IDENT "(" [FuncFParams] ")" Block
-FuncDef: Box<FuncDef> =
-    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams?> ")" <block: Block> => Box::new(FuncDef { <> });
+FuncDef: Box<FuncDef> = {
+    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams> ")" ";"
+        => Box::new(FuncDef { <>, block: None }),
+    <func_type: BuiltinType> <ident: Ident> "(" <params: FuncFParams> ")" <b: Block>
+        => Box::new(FuncDef { func_type, ident, params, block: Some(b) }),
+}
 
 // FuncFParams ::= FuncFParam {"," FuncFParam}
-FuncFParams: Box<FuncFParams> = <params: Comma<FuncFParam>> => Box::new(FuncFParams{ <> });
+FuncFParams: Vec<Box<FuncFParam>> = <params: (<Comma<FuncFParam>>)?> => <>.unwrap_or(Vec::new());
 
 // FuncFParam  ::= BuiltinType IDENT ["[" "]" {"[" Exp "]"}]
 FuncFParam: Box<FuncFParam> = {
