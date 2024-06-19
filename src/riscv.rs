@@ -2,9 +2,15 @@ use crate::translate_util::Register;
 
 #[derive(Debug, Clone)]
 pub struct StackLayout {
+    /// whether the function doesn't calls any other functions
+    pub leaf: bool,
+    /// the maximum number of arguments that need to pass by storing in the stack
     pub args: usize,
+    /// the maximum number of `a_` registers that need to be save
     pub save_reg_a: usize,
+    /// the maximum number of `s_` registers that need to be save
     pub save_reg_s: usize,
+    /// the total size of the stack, in bytes
     pub total: usize,
 }
 
@@ -90,7 +96,7 @@ pub enum RiscvInstruction {
     Bne(Register, Register, String),
     Jump(String),
     Call(String),
-    Ret(StackLayout),
+    Ret,
     // Memory
     Lw(Register, i32, Register),
     Sw(Register, i32, Register),
@@ -173,15 +179,15 @@ impl std::fmt::Display for RiscvFunction {
                 writeln!(f, "{}:", block.name)?;
             }
             for inst in block.instructions.iter() {
-                write!(f, "{}", inst)?;
+                inst.display(f, &self.stack_layout)?;
             }
         }
         Ok(())
     }
 }
 
-impl std::fmt::Display for RiscvInstruction {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl RiscvInstruction {
+    fn display(&self, f: &mut std::fmt::Formatter<'_>, layout: &StackLayout) -> std::fmt::Result {
         match self {
             RiscvInstruction::Comment(s) => writeln!(f, "  # {s}"),
             RiscvInstruction::Nop => Ok(()),
@@ -193,7 +199,7 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Bne(a, b, s) => writeln!(f, "  bne {a}, {b}, {s}"),
             RiscvInstruction::Jump(label) => writeln!(f, "  j {label}"),
             RiscvInstruction::Call(label) => writeln!(f, "  call {label}"),
-            RiscvInstruction::Ret(layout) => {
+            RiscvInstruction::Ret => {
                 if layout.total > 0 {
                     if layout.total < 2048 {
                         writeln!(f, "  addi sp, sp, {}", layout.total)?;
@@ -227,6 +233,8 @@ impl std::fmt::Display for RiscvInstruction {
             RiscvInstruction::Bexpi(op, dst, src, int) => {
                 if (-2048..2048).contains(int) && op.combinable() {
                     writeln!(f, "  {}i {dst}, {src}, {int}", op.name())
+                } else if matches!(op, Bop::Sub) && (-2047..=2048).contains(int) {
+                    writeln!(f, "  addi {dst}, {src}, {}", -int)
                 } else if matches!(op, Bop::Mul) && int_log2(int).is_some() {
                     writeln!(f, "  slli {dst}, {src}, {}", int_log2(int).unwrap())
                 } else {

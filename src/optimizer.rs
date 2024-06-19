@@ -110,6 +110,14 @@ impl RiscvFunction {
                             block.instructions[i - 1] = Beq(a, b, label.clone());
                             block.instructions[i] = Nop;
                         }
+                        Bexpi(Bop::Slt, dst, a, b) if dst == cond => {
+                            block.instructions[i] = Bge(a, Register::T0, label.clone());
+                            block.instructions[i - 1] = Li(Register::T0, b);
+                        }
+                        Bexpi(Bop::Xor | Bop::Sub, dst, a, b) if dst == cond => {
+                            block.instructions[i] = Beq(a, Register::T0, label.clone());
+                            block.instructions[i - 1] = Li(Register::T0, b);
+                        }
                         _ => {}
                     },
                     Bnez(cond, ref label) => match block.instructions[i - 1] {
@@ -128,6 +136,14 @@ impl RiscvFunction {
                         Bexp(Bop::Xor | Bop::Sub, dst, a, b) if dst == cond => {
                             block.instructions[i - 1] = Bne(a, b, label.clone());
                             block.instructions[i] = Nop;
+                        }
+                        Bexpi(Bop::Slt, dst, a, b) if dst == cond => {
+                            block.instructions[i] = Blt(a, Register::T0, label.clone());
+                            block.instructions[i - 1] = Li(Register::T0, b);
+                        }
+                        Bexpi(Bop::Xor | Bop::Sub, dst, a, b) if dst == cond => {
+                            block.instructions[i] = Bne(a, Register::T0, label.clone());
+                            block.instructions[i - 1] = Li(Register::T0, b);
                         }
                         _ => {}
                     },

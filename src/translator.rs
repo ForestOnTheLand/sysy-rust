@@ -98,8 +98,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         func_data,
         table: RegGroup::new_temp(),
         symbol: AllocTable::new(),
-        stack_layout: stack_layout.clone(),
-        stack_pos: Box::new(stack_layout.args as i32 * 4),
+        pos: Box::new(stack_layout.args as i32 * 4),
         allocator,
     };
 
@@ -134,6 +133,7 @@ fn allocate_stack(func_data: &FunctionData, _allocator: &Allocator) -> StackLayo
     let mut args = 0;
     let mut save_reg_a = 0;
     let mut save_reg_s = 0;
+    let mut leaf = true;
     for (_bb, node) in func_data.layout().bbs() {
         for &inst in node.insts().keys() {
             if !func_data.dfg().value(inst).ty().is_unit() {
@@ -156,6 +156,7 @@ fn allocate_stack(func_data: &FunctionData, _allocator: &Allocator) -> StackLayo
                     args = max(args, call.args().len() - 8);
                 }
                 save_reg_a = 8;
+                leaf = false;
             }
         }
     }
@@ -163,6 +164,7 @@ fn allocate_stack(func_data: &FunctionData, _allocator: &Allocator) -> StackLayo
     let total = (total + 15) & !0xf;
     StackLayout {
         total,
+        leaf,
         args,
         save_reg_a,
         save_reg_s,
@@ -174,8 +176,7 @@ struct TranslateConfig<'a> {
     func_data: &'a FunctionData,
     table: RegGroup,
     symbol: AllocTable,
-    stack_layout: StackLayout,
-    stack_pos: Box<i32>,
+    pos: Box<i32>,
     allocator: Allocator,
 }
 
@@ -205,10 +206,10 @@ fn translate_instruction(
             } else {
                 insts.push(RiscvInstruction::Comment(format!(
                     "alloc at {}(sp), size {}",
-                    *config.stack_pos, size
+                    *config.pos, size
                 )));
-                config.symbol.store_stack_pointer(value, *config.stack_pos);
-                *config.stack_pos += size as i32;
+                config.symbol.store_stack_pointer(value, *config.pos);
+                *config.pos += size as i32;
             }
         }
 
@@ -426,7 +427,7 @@ fn translate_instruction(
                 }
                 None => {}
             };
-            insts.push(RiscvInstruction::Ret(config.stack_layout.clone()));
+            insts.push(RiscvInstruction::Ret);
         }
 
         _ => unreachable!(),
@@ -469,8 +470,8 @@ fn prepare_value(
                     Register::A[arg.index()]
                 } else {
                     let reg = config.table.get_vaccant();
-                    let offset = config.stack_layout.total + (arg.index() - 8) * 4;
-                    insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::SP));
+                    let offset = (arg.index() - 8) * 4;
+                    insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::S0));
                     reg
                 }
             }
@@ -534,11 +535,11 @@ fn save_value(
             config.table.reset(reg);
         }
         None => {
-            config.symbol.store_stack(value, *config.stack_pos);
-            let pos = *config.stack_pos;
+            config.symbol.store_stack(value, *config.pos);
+            let pos = *config.pos;
             insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
             config.table.reset(reg);
-            *config.stack_pos += 4;
+            *config.pos += 4;
         }
     }
 }
