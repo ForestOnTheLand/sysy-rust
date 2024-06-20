@@ -100,6 +100,7 @@ fn translate_function(program: &Program, func_data: &FunctionData, code: &mut Ri
         symbol: AllocTable::new(),
         pos: Box::new(stack_layout.args as i32 * 4),
         allocator,
+        layout: stack_layout,
     };
 
     for (&bb, node) in func_data.layout().bbs() {
@@ -165,6 +166,7 @@ fn allocate_stack(func_data: &FunctionData, _allocator: &Allocator) -> StackLayo
     StackLayout {
         total,
         leaf,
+        use_s0: !leaf || total >= 2048,
         args,
         save_reg_a,
         save_reg_s,
@@ -178,6 +180,7 @@ struct TranslateConfig<'a> {
     symbol: AllocTable,
     pos: Box<i32>,
     allocator: Allocator,
+    layout: StackLayout,
 }
 
 /// Translate a single KoopaIR instruction into several RISCV instructions.
@@ -237,7 +240,7 @@ fn translate_instruction(
                 let pos = config.symbol.get_stack_pointer(&store.dest());
                 for (index, value) in values.into_iter().enumerate() {
                     let reg = prepare_value(value, insts, config, None);
-                    let offset = pos + (index as i32) * 4;
+                    let offset = pos + (index as i32) * 4 - config.layout.offset();
                     insts.push(RiscvInstruction::Sw(reg, offset, Register::SP));
                     config.table.reset(reg);
                 }
@@ -310,8 +313,8 @@ fn translate_instruction(
                 save_value(value, dst, insts, config);
             } else {
                 insts.push(RiscvInstruction::Bexp(Bop::Add, tmp, reg, tmp));
-                config.table.reset(tmp);
-                save_value(value, reg, insts, config);
+                config.table.reset(reg);
+                save_value(value, tmp, insts, config);
             }
         }
 
@@ -444,13 +447,13 @@ fn prepare_value(
         Some(AllocPos::Reg(reg)) => *reg,
         Some(AllocPos::RegPointer(_)) => unreachable!("Register is not addressible"),
         Some(AllocPos::Stack(pos)) => {
-            let pos = *pos;
+            let pos = *pos - config.layout.offset();
             let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
             insts.push(RiscvInstruction::Lw(reg, pos, Register::SP));
             reg
         }
         Some(AllocPos::StackPointer(pos)) => {
-            let pos = *pos;
+            let pos = *pos - config.layout.offset();
             let reg = reg.unwrap_or_else(|| config.table.get_vaccant());
             insts.push(RiscvInstruction::Bexpi(Bop::Add, reg, Register::SP, pos));
             reg
@@ -471,7 +474,11 @@ fn prepare_value(
                 } else {
                     let reg = config.table.get_vaccant();
                     let offset = (arg.index() - 8) * 4;
-                    insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::S0));
+                    if config.layout.use_s0 {
+                        insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::S0));
+                    } else {
+                        insts.push(RiscvInstruction::Lw(reg, offset as i32, Register::SP));
+                    }
                     reg
                 }
             }
@@ -490,11 +497,13 @@ fn load_into(
         Some(AllocPos::Reg(reg)) => insts.push(RiscvInstruction::Lw(dst, 0, *reg)),
         Some(AllocPos::RegPointer(reg)) => insts.push(RiscvInstruction::Mv(dst, *reg)),
         Some(AllocPos::Stack(pos)) => {
-            insts.push(RiscvInstruction::Lw(Register::T0, *pos, Register::SP));
+            let pos = *pos - config.layout.offset();
+            insts.push(RiscvInstruction::Lw(Register::T0, pos, Register::SP));
             insts.push(RiscvInstruction::Lw(dst, 0, Register::T0));
         }
         Some(AllocPos::StackPointer(pos)) => {
-            insts.push(RiscvInstruction::Lw(dst, *pos, Register::SP))
+            let pos = *pos - config.layout.offset();
+            insts.push(RiscvInstruction::Lw(dst, pos, Register::SP))
         }
         None => unreachable!("can not load into a Right Value"),
     };
@@ -510,11 +519,13 @@ fn store_into(
         Some(AllocPos::Reg(reg)) => insts.push(RiscvInstruction::Sw(src, 0, *reg)),
         Some(AllocPos::RegPointer(reg)) => insts.push(RiscvInstruction::Mv(*reg, src)),
         Some(AllocPos::Stack(pos)) => {
-            insts.push(RiscvInstruction::Lw(Register::T0, *pos, Register::SP));
+            let pos = *pos - config.layout.offset();
+            insts.push(RiscvInstruction::Lw(Register::T0, pos, Register::SP));
             insts.push(RiscvInstruction::Sw(src, 0, Register::T0));
         }
         Some(AllocPos::StackPointer(pos)) => {
-            insts.push(RiscvInstruction::Sw(src, *pos, Register::SP))
+            let pos = *pos - config.layout.offset();
+            insts.push(RiscvInstruction::Sw(src, pos, Register::SP))
         }
         None => unreachable!("can not load into a Right Value"),
     };
@@ -536,7 +547,7 @@ fn save_value(
         }
         None => {
             config.symbol.store_stack(value, *config.pos);
-            let pos = *config.pos;
+            let pos = *config.pos - config.layout.offset();
             insts.push(RiscvInstruction::Sw(reg, pos, Register::SP));
             config.table.reset(reg);
             *config.pos += 4;

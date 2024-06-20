@@ -7,14 +7,14 @@ impl RiscvProgram {
     pub fn optimize(&mut self) {
         const LOOPS: i32 = 2;
         for func in self.functions.iter_mut() {
-            // for _ in 0..LOOPS {
-            func.clear_useless();
-            func.fold_constant();
-            func.fold_move();
-            func.fold_addi();
-            func.fold_condition();
-            func.eliminate_load();
-            // }
+            for _ in 0..LOOPS {
+                func.clear_useless();
+                func.fold_constant();
+                func.fold_move();
+                func.fold_addi();
+                func.fold_condition();
+                func.eliminate_load();
+            }
             func.eliminate_jump();
         }
     }
