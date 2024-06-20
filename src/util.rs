@@ -10,11 +10,15 @@ pub enum Mode {
     Perf,
 }
 
+/// Print the usage of the program and then panic.
 pub fn print_usage() -> ! {
     let program = env::args().next().unwrap_or("<program>".to_string());
     panic!("Usage: {program} <mode> <input_file> -o <output_file>");
 }
 
+/// Parse the arguments.
+/// # Panic
+/// Invalid arguments.
 pub fn parse_args() -> (Mode, String, fs::File) {
     let args: Vec<String> = env::args().collect();
     let mode = match &args[1] as &str {

@@ -11,6 +11,7 @@ use koopa::ir::{
 };
 use std::{cmp::max, io};
 
+/// Print RISCV program.
 pub fn output_program(program: &RiscvProgram, output: impl io::Write) {
     let mut output = output;
     writeln!(output, "{}", program).unwrap();
