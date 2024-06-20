@@ -1,3 +1,5 @@
+//! Optimize the RISCV program, mainly through peek hole optimization.
+
 use crate::{
     riscv::{Bop, RiscvBlock, RiscvFunction, RiscvInstruction, RiscvProgram},
     translate_util::{RegGroup, Register},
@@ -86,6 +88,7 @@ impl RiscvFunction {
         }
     }
 
+    /// Combine a branch instruction with some previous instructions.
     fn fold_condition(&mut self) {
         use RiscvInstruction::*;
         for block in self.blocks.iter_mut() {
@@ -156,6 +159,7 @@ impl RiscvFunction {
         }
     }
 
+    /// Combine a `mv` instruction with other isntructions.
     fn fold_move(&mut self) {
         use RiscvInstruction::{Bexp, Bexpi, La, Lw, Mv, Nop};
         for block in self.blocks.iter_mut() {
@@ -199,6 +203,7 @@ impl RiscvFunction {
         }
     }
 
+    /// Constant Folding.
     fn fold_constant(&mut self) {
         use RiscvInstruction::*;
         for block in self.blocks.iter_mut() {

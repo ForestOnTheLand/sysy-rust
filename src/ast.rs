@@ -1,5 +1,5 @@
 //! In this file, different kinds of AST are defined
-//! using BNF, with the following special notations:
+//! using BNF, with some following special notations.
 //!
 //! - {`A`} means repeating `A` for 0 or more times
 //! - \[`A`\] means optional `A`
@@ -21,7 +21,7 @@ pub struct CompUnit {
     pub items: Vec<Box<GlobalItem>>,
 }
 
-/// [`GlobalItem`] `::=` [`GlobalDecl`] | [`FuncDef`]
+/// [`GlobalItem`] `::=` [`Decl`] | [`FuncDef`]
 #[derive(Debug)]
 pub enum GlobalItem {
     Decl(Box<Decl>),
@@ -37,7 +37,7 @@ pub struct FuncDef {
     pub block: Option<Block>,
 }
 
-/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` ["[" "]" {"[" [`Exp`] "]"}]
+/// [`FuncFParam`]  ::= [`BuiltinType`] `IDENT` [`"["` `"]"` {`"["` [`Exp`] `"]"`}]
 #[derive(Debug)]
 pub struct FuncFParam {
     pub btype: BuiltinType,
@@ -62,9 +62,9 @@ pub enum BlockItem {
 ///        | [`Exp`] `";"`
 ///        | [`Block`]
 ///        | `"if"` `"("` [`Exp`] `")"` [`Stmt`] [`"else"` [`Stmt`]]
-///        | "while" "(" [`Exp`] ")" [`Stmt`]
-///        | "break" ";"
-///        | "continue" ";"
+///        | `"while"` `"("` [`Exp`] `")"` [`Stmt`]
+///        | `"break"` `";"`
+///        | `"continue"` `";"`
 ///        | `"return"` [[`Exp`]] `";"`
 #[derive(Debug)]
 pub enum Stmt {
@@ -79,7 +79,7 @@ pub enum Stmt {
 }
 
 /// [`Def`] `::=` `IDENT` {`"["` [`Exp`] `"]"`}
-///               | `IDENT` {`"["` [`Exp`] `"]"`} `"="` [`InitVal`]
+///       | `IDENT` {`"["` [`Exp`] `"]"`} `"="` [`InitVal`]
 #[derive(Debug)]
 pub struct Def {
     pub ident: String,
@@ -94,7 +94,7 @@ pub enum InitVal {
     Array(Vec<Box<InitVal>>),
 }
 
-/// [`Decl`] `::=` [`"const"`] [`BuiltinType`] [`Def`] {`","` [`Def`]} ``";"``
+/// [`Decl`] `::=` [`"const"`] [`BuiltinType`] [`Def`] {`","` [`Def`]} `";"`
 #[derive(Debug)]
 pub struct Decl {
     pub btype: BuiltinType,
@@ -141,6 +141,8 @@ impl UnaryOperator {
     }
 }
 
+/// [`BinaryOperator`] `::=` `"!="` | `"=="` | `">"` | `"<"` | `">="` | `"<="`
+///                  | `"+"` | `"-"` | `"*"` | `"/"` | `"%"` | `"&&"` | `"||"`
 #[derive(Debug, Clone, Copy)]
 pub enum BinaryOperator {
     NotEq,

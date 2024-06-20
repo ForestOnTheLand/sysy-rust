@@ -1,4 +1,8 @@
 //! In this file, the conversion from AST to KoopaIR is provided.
+//!
+//! The core function [`build_program`] converts a
+//! [`CompUnit`] AST into a Koopa [`Program`], and
+//! [`output_program`] just simply output a Koopa [`Program`].
 
 use crate::ast::*;
 use crate::build_util::{Symbol, SymbolTable};
@@ -59,7 +63,7 @@ fn declare_builtins(program: &mut Program, symtab: &mut SymbolTable) {
     }
 }
 
-/// Write a [`CompUnit`] into a program.
+/// Write a [`CompUnit`] into a [`Program`].
 fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut SymbolTable) {
     for item in comp_unit.items.iter() {
         match item.as_ref() {
@@ -69,7 +73,7 @@ fn build_comp_unit(program: &mut Program, comp_unit: &CompUnit, symtab: &mut Sym
     }
 }
 
-/// Write a **global** [`Decl`] into a program,
+/// Write a **global** [`Decl`] into a [`Program`],
 /// with functions [`build_global_const_def`], [`build_global_var_def`] used.
 fn build_global_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTable) {
     assert_eq!(decl.btype, BuiltinType::Int, "Invalid global value type");
@@ -82,7 +86,7 @@ fn build_global_decl(program: &mut Program, decl: &Decl, symtab: &mut SymbolTabl
     }
 }
 
-/// Write a **const** **global** [`Def`] into a program.
+/// Write a **const** **global** [`Def`] into a [`Program`].
 fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data = def.init.as_ref().expect("expected an initial value");
@@ -103,7 +107,7 @@ fn build_global_const_def(program: &mut Program, def: &Def, symtab: &mut SymbolT
     }
 }
 
-/// Write a **global** [`Def`] into a program.
+/// Write a **non-const** **global** [`Def`] into a [`Program`].
 fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTable) {
     let shape = compute_shape(&def.shape, symtab);
     let data: Value = match &def.init {
@@ -128,7 +132,7 @@ fn build_global_var_def(program: &mut Program, def: &Def, symtab: &mut SymbolTab
     symtab.insert_var(def.ident.clone(), var, ty);
 }
 
-/// Write a [`FuncDef`] into a program.
+/// Write a [`FuncDef`] into a [`Program`].
 fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut SymbolTable) {
     if func_def.block.is_none() {
         let name = &func_def.ident;
@@ -302,6 +306,7 @@ fn build_var_def(
     }
 }
 
+/// Builds a **const** [`Def`] into a [`FunctionData`].
 fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &mut SymbolTable) {
     let shape: Vec<usize> = def
         .shape
@@ -328,6 +333,7 @@ fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &
     }
 }
 
+/// Compute the value of an [`Exp`] at compile time.
 fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
     match exp {
         Exp::Unary(op, exp) => op.compute(compute_exp(exp, symtab)),
@@ -340,11 +346,12 @@ fn compute_exp(exp: &Exp, symtab: &SymbolTable) -> i32 {
     }
 }
 
+/// Builds a [`LVal`] into a [`FunctionData`].
 fn build_lval(
     func: &mut FunctionData,
     bb: BasicBlock,
     lval: &LVal,
-    symtab: &SymbolTable,
+    symtab: &mut SymbolTable,
 ) -> (Value, BasicBlock, Type) {
     let mut bb = bb;
     let (array, ty) = symtab.get_var(&lval.ident);
@@ -375,6 +382,7 @@ fn build_lval(
     (pointer, bb, current_type)
 }
 
+/// Builds a [`Stmt`] into a [`FunctionData`].
 fn build_stmt(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -482,11 +490,12 @@ fn build_stmt(
     }
 }
 
+/// Builds an [`Exp`] into a [`FunctionData`].
 fn build_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     exp: &Exp,
-    symtab: &SymbolTable,
+    symtab: &mut SymbolTable,
 ) -> (Value, BasicBlock) {
     match exp {
         // Build a single number
@@ -587,13 +596,16 @@ fn build_exp(
     }
 }
 
+/// Builds a **logical** [`Exp`] into a [`FunctionData`].
+/// The jump or branch instructions is dealed within this function.
+/// It will jump to `true_bb` when the `exp` is true, and to `false_bb` otherwise.
 fn build_logical_exp(
     func: &mut FunctionData,
     bb: BasicBlock,
     true_bb: BasicBlock,
     false_bb: BasicBlock,
     exp: &Exp,
-    symtab: &SymbolTable,
+    symtab: &mut SymbolTable,
 ) {
     match exp {
         // Build a single number
@@ -633,14 +645,14 @@ fn build_logical_exp(
 
 // Helper functions
 
-/// Judge whether a block is marked with unused
+/// Judge whether a block is marked with unused.
 fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
     let name = func.dfg().bb(bb).name().as_ref();
     name.expect("basic blocks should have a non-default name")
         .starts_with("%koopa_builtin_unused")
 }
 
-/// Add a new instruction into a basic block.
+/// Add a new [`Value`] into a [`BasicBlock`] of a [`FunctionData`].
 fn add_value(func: &mut FunctionData, bb: BasicBlock, inst: Value) {
     if !is_unused_block(func, bb) {
         func.layout_mut()
@@ -651,15 +663,17 @@ fn add_value(func: &mut FunctionData, bb: BasicBlock, inst: Value) {
     }
 }
 
+/// Create a new [`Value`] within a [`FunctionData`].
 fn new_value(func: &mut FunctionData) -> LocalBuilder {
     func.dfg_mut().new_value()
 }
 
-/// Add a new basic block into a function.
+/// Add a new [`BasicBlock`] into a [`FunctionData`].
 fn add_bb(func: &mut FunctionData, bb: BasicBlock) {
     func.layout_mut().bbs_mut().push_key_back(bb).unwrap()
 }
 
+/// Create a new [`BasicBlock`] within a [`FunctionData`].
 fn new_bb(func: &mut FunctionData, name: String) -> BasicBlock {
     func.dfg_mut().new_bb().basic_block(Some(name))
 }

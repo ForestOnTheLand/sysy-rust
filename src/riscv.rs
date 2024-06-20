@@ -1,3 +1,5 @@
+//! Data structure for RISCV assembly, easy to traverse, move and change.
+
 use crate::translate_util::Register;
 
 #[derive(Debug, Clone)]

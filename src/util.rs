@@ -1,5 +1,6 @@
-//! Small tools, including
-//! - [`parse_args`] for parsing arguments
+//! Small tools
+//!
+//! including [`parse_args`] for parsing arguments
 
 use std::{env, fs};
 

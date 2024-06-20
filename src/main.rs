@@ -1,23 +1,14 @@
-//! I'll do my best to keep the main.rs file clean.
+//! I'll do my best to keep the main file clean.
 //! Modularizing is good!
 
-/// Struct/Enum for AST
 mod ast;
-/// Symbol table
 mod build_util;
-/// Build KoopaIR from AST
 mod builder;
-/// Value lifetime checker
 mod lifetime;
-/// Optimizer
 mod optimizer;
-/// RISCV
 mod riscv;
-/// RISCV Register
 mod translate_util;
-/// Translate KoopaIR into RISCV
 mod translator;
-/// Util functions
 mod util;
 
 use lalrpop_util::lalrpop_mod;

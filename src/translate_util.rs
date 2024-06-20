@@ -1,13 +1,17 @@
 //! Allocation policy of RISCV assembly code.
-//! Temporary variables are allocated on either registers or stack.
-//! We will use a trivial policy: use at most 12 registers for variables,
-//! and if there are more variables, allocate them on stack.
+//!
+//! - **Temporary variables**
+//!   - are variables that are generated in KoopaIR, but not appears in Sysy source code.
+//!   - We will use a0-a7 for them, and if there are more variables, spill them onto stack.
+//! - **Long-lifetime variables**
+//!   - are variables that appears in Sysy source code, and are created by `alloc` in KoopaIR as a result.
+//!   - We will use s1-s11 for them, and if there are more variables, spill them onto stack.
 
 use koopa::ir::Value;
 use std::collections::HashMap;
 use std::{fmt, str};
 
-/// RISCV registers, with [`Register::id`] in 0~31 (32 in total)
+/// RISCV registers, with id in 0~31 (32 in total)
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Register(u8);
 

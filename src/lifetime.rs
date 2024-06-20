@@ -1,3 +1,11 @@
+//! Lifetime analysis for KoopaIR.
+//!
+//! Since the KoopaIR is an SSA (Static Single Assignment) form, lifetime analysis seems easier.
+//! - For temporary values, the can never live out of a block, so its lifetime is just simply an interval
+//!   from its first to its last appearance.
+//! - For long-lifetime values, they are hard to analysis (they are created through `alloc`).
+//!   We just simply assume they are "static", i.e. they are active throughout the whole function.
+
 use std::{
     cmp::{max, min},
     collections::{BTreeSet, HashMap},
