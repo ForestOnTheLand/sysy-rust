@@ -6,6 +6,7 @@ use koopa::back::KoopaGenerator;
 use koopa::ir::{builder::LocalBuilder, builder_traits::*, TypeKind, ValueKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
+use std::convert::Into;
 use std::io;
 
 /// One of the core features. Output a KoopaIR program into output, by using the given API.

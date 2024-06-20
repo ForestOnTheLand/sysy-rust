@@ -179,9 +179,9 @@ impl BinaryOperator {
             BinaryOperator::And => (left != 0 && right != 0) as i32,
             BinaryOperator::Or => (left != 0 || right != 0) as i32,
             BinaryOperator::Xor => left ^ right,
-            BinaryOperator::Shl => unimplemented!(),
-            BinaryOperator::Shr => unimplemented!(),
-            BinaryOperator::Sar => unimplemented!(),
+            BinaryOperator::Shl => left << right,
+            BinaryOperator::Shr => (left as u32 >> right) as i32,
+            BinaryOperator::Sar => left >> right,
         }
     }
 }

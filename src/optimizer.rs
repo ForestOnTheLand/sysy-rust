@@ -5,13 +5,16 @@ use crate::{
 
 impl RiscvProgram {
     pub fn optimize(&mut self) {
+        const LOOPS: i32 = 2;
         for func in self.functions.iter_mut() {
+            // for _ in 0..LOOPS {
             func.clear_useless();
             func.fold_constant();
             func.fold_move();
-            func.fold_addi();
+            // func.fold_addi();
             func.fold_condition();
             func.eliminate_load();
+            // }
             func.eliminate_jump();
         }
     }
@@ -33,9 +36,8 @@ impl RiscvFunction {
                     Bexpi(Bop::Add, dst, a, 0) | Bexp(Bop::Add, dst, a, Register::X0) => {
                         block.instructions[i] = if dst == a { Nop } else { Mv(dst, a) };
                     }
-
-                    // Bexp(_, Register::X0, _, _) => block.instructions[i] = Nop,
-                    // Bexpi(_, Register::X0, _, _) => block.instructions[i] = Nop,
+                    Bexp(_, Register::X0, _, _) => block.instructions[i] = Nop,
+                    Bexpi(_, Register::X0, _, _) => block.instructions[i] = Nop,
                     _ => {}
                 };
             }
@@ -155,33 +157,43 @@ impl RiscvFunction {
     }
 
     fn fold_move(&mut self) {
-        use RiscvInstruction::{Bexp, Bexpi, Lw, Mv, Nop};
+        use RiscvInstruction::{Bexp, Bexpi, La, Lw, Mv, Nop};
         for block in self.blocks.iter_mut() {
             let num = block.instructions.len();
             if num == 0 {
                 continue;
             }
-            for i in 1..(num - 1) {
-                if let Mv(dst, src) = block.instructions[i] {
-                    if RegGroup::VAR.contains(&src) {
-                        continue;
-                    }
-                    match block.instructions[i - 1] {
-                        Bexpi(op, d, a, b) if d == src => {
-                            block.instructions[i - 1] = Nop;
-                            block.instructions[i] = Bexpi(op, dst, a, b);
-                        }
-                        Bexp(op, d, a, b) if d == src => {
-                            block.instructions[i - 1] = Nop;
-                            block.instructions[i] = Bexp(op, dst, a, b);
-                        }
-                        Lw(d, a, b) if d == src => {
-                            block.instructions[i - 1] = Nop;
-                            block.instructions[i] = Lw(dst, a, b);
-                        }
-                        _ => {}
-                    };
+            for i in (1..num).rev() {
+                let (dst, src) = match block.instructions[i] {
+                    Mv(dst, src) | Bexpi(Bop::Add, dst, src, 0) => (dst, src),
+                    _ => continue,
+                };
+                if RegGroup::VAR.contains(&src) {
+                    continue;
                 }
+                match block.instructions[i - 1] {
+                    Bexpi(op, d, a, b) if d == src => {
+                        block.instructions[i - 1] = Nop;
+                        block.instructions[i] = Bexpi(op, dst, a, b);
+                    }
+                    Bexp(op, d, a, b) if d == src => {
+                        block.instructions[i - 1] = Nop;
+                        block.instructions[i] = Bexp(op, dst, a, b);
+                    }
+                    Mv(d, s) if d == src => {
+                        block.instructions[i - 1] = Nop;
+                        block.instructions[i] = Mv(dst, s);
+                    }
+                    Lw(d, a, b) if d == src => {
+                        block.instructions[i - 1] = Nop;
+                        block.instructions[i] = Lw(dst, a, b);
+                    }
+                    La(d, ref label) if d == src => {
+                        block.instructions[i - 1] = La(dst, label.clone());
+                        block.instructions[i] = Nop;
+                    }
+                    _ => {}
+                };
             }
             block.clear_nop();
         }
