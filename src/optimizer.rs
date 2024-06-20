@@ -11,7 +11,7 @@ impl RiscvProgram {
             func.clear_useless();
             func.fold_constant();
             func.fold_move();
-            // func.fold_addi();
+            func.fold_addi();
             func.fold_condition();
             func.eliminate_load();
             // }
