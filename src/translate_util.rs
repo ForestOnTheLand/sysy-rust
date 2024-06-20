@@ -149,10 +149,9 @@ impl AllocTable {
     }
 
     pub fn get_stack_pointer(&mut self, value: &Value) -> i32 {
-        if let Some(AllocPos::StackPointer(p)) = self.data.get(value) {
-            p.clone()
-        } else {
-            panic!()
+        match self.data.get(value) {
+            Some(AllocPos::StackPointer(p)) => p.clone(),
+            _ => panic!(),
         }
     }
 }

@@ -161,8 +161,10 @@ impl std::fmt::Display for RiscvFunction {
         let name = &self.blocks[0].name;
         writeln!(f, "  .globl {}\n{}:", name, name)?;
         let stack_size = self.stack_layout.total;
-        writeln!(f, "  sw ra, -4(sp)")?;
-        for i in 0..=self.stack_layout.save_reg_s {
+        if !self.stack_layout.leaf {
+            writeln!(f, "  sw ra, -4(sp)\n  sw s0, -8(sp)")?;
+        }
+        for i in 1..=self.stack_layout.save_reg_s {
             writeln!(f, "  sw s{}, -{}(sp)", i, 8 + 4 * i)?;
         }
         writeln!(f, "  mv s0, sp")?;
@@ -208,8 +210,10 @@ impl RiscvInstruction {
                         writeln!(f, "  add sp, sp, t0")?;
                     }
                 }
-                writeln!(f, "  lw ra, -4(sp)")?;
-                for i in 0..=layout.save_reg_s {
+                if !layout.leaf {
+                    writeln!(f, "  lw ra, -4(sp)\n  lw s0, -8(sp)")?;
+                }
+                for i in 1..=layout.save_reg_s {
                     writeln!(f, "  lw s{}, -{}(sp)", i, 8 + 4 * i)?;
                 }
 

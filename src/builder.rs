@@ -3,17 +3,10 @@
 use crate::ast::*;
 use crate::build_util::{Symbol, SymbolTable};
 use koopa::back::KoopaGenerator;
-use koopa::ir::{builder_traits::*, TypeKind, ValueKind};
+use koopa::ir::{builder::LocalBuilder, builder_traits::*, TypeKind, ValueKind};
 use koopa::ir::{BasicBlock, BinaryOp, Function, FunctionData, Program, Type, Value};
 
 use std::io;
-
-/// Add a new value into a function.
-macro_rules! new_value {
-    ($func:expr) => {
-        $func.dfg_mut().new_value()
-    };
-}
 
 /// One of the core features. Output a KoopaIR program into output, by using the given API.
 pub fn output_program(program: &Program, output: impl io::Write) {
@@ -162,10 +155,10 @@ fn build_function(program: &mut Program, func_def: &FuncDef, symtab: &mut Symbol
     let bb = build_block(func_data, bb, func_def.block.as_ref().unwrap(), symtab);
     if !is_unused_block(func_data, bb) {
         let ret = if ret.is_unit() {
-            new_value!(func_data).ret(None)
+            new_value(func_data).ret(None)
         } else {
-            let zero = new_value!(func_data).integer(0);
-            new_value!(func_data).ret(Some(zero))
+            let zero = new_value(func_data).integer(0);
+            new_value(func_data).ret(Some(zero))
         };
         add_value(func_data, bb, ret);
     }
@@ -218,10 +211,10 @@ fn build_params(
         let value = func.params()[i];
         let ident = format!("%{}", param.ident);
         let ty = func.dfg().value(value).ty().clone();
-        let p = new_value!(func).alloc(ty);
+        let p = new_value(func).alloc(ty);
         func.dfg_mut().set_value_name(p, Some(ident.clone()));
         add_value(func, bb, p);
-        let store = new_value!(func).store(value, p);
+        let store = new_value(func).store(value, p);
         add_value(func, bb, store);
         let ty = func.dfg().value(p).ty().clone();
         symtab.insert_var(param.ident.clone(), p, ty);
@@ -257,7 +250,7 @@ fn build_block_item(
     }
 }
 
-/// Builds a declaration into a function.
+/// Builds a [`Decl`] into a [`Function`].
 fn build_decl(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -265,28 +258,20 @@ fn build_decl(
     symtab: &mut SymbolTable,
 ) -> BasicBlock {
     if decl.mutable {
-        build_var_decl(func, bb, decl, symtab)
+        let mut bb = bb;
+        for def in decl.defs.iter() {
+            bb = build_var_def(func, bb, def, symtab);
+        }
+        bb
     } else {
-        build_const_decl(func, bb, decl, symtab);
+        for def in decl.defs.iter() {
+            build_const_def(func, bb, def, symtab);
+        }
         bb
     }
 }
 
-/// Builds a [`VarDecl`] into a [`FunctionData`].
-fn build_var_decl(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    decl: &Decl,
-    symtab: &mut SymbolTable,
-) -> BasicBlock {
-    let mut bb = bb;
-    for def in decl.defs.iter() {
-        bb = build_var_def(func, bb, def, symtab);
-    }
-    bb
-}
-
-/// Builds a [`VarDef`] into a [`FunctionData`].
+/// Builds a [`Def`] into a [`FunctionData`].
 fn build_var_def(
     func: &mut FunctionData,
     bb: BasicBlock,
@@ -299,7 +284,7 @@ fn build_var_def(
 
     let shape = compute_shape(&def.shape, symtab);
 
-    let var = new_value!(func).alloc(get_array_type(&shape));
+    let var = new_value(func).alloc(get_array_type(&shape));
     func.dfg_mut()
         .set_value_name(var, Some(format!("@{}_{}", def.ident, symtab.get_id())));
     add_value(func, bb, var);
@@ -307,23 +292,12 @@ fn build_var_def(
     symtab.insert_var(def.ident.clone(), var, ty);
     if let Some(init_value) = &def.init {
         let (values, bb) = build_init_value(func, bb, &init_value, shape.clone(), symtab);
-        let value = packing(|e| new_value!(func).aggregate(e), values, &shape);
-        let store = new_value!(func).store(value, var);
+        let value = packing(|e| new_value(func).aggregate(e), values, &shape);
+        let store = new_value(func).store(value, var);
         add_value(func, bb, store);
         bb
     } else {
         bb
-    }
-}
-
-fn build_const_decl(
-    func: &mut FunctionData,
-    bb: BasicBlock,
-    decl: &Decl,
-    symtab: &mut SymbolTable,
-) {
-    for def in decl.defs.iter() {
-        build_const_def(func, bb, def, symtab);
     }
 }
 
@@ -339,12 +313,12 @@ fn build_const_def(func: &mut FunctionData, bb: BasicBlock, def: &Def, symtab: &
     if shape.is_empty() {
         symtab.insert_const(def.ident.clone(), data[0]);
     } else {
-        let values = data.iter().map(|&i| new_value!(func).integer(i)).collect();
-        let value = packing(|elems| new_value!(func).aggregate(elems), values, &shape);
+        let values = data.iter().map(|&i| new_value(func).integer(i)).collect();
+        let value = packing(|elems| new_value(func).aggregate(elems), values, &shape);
         let ty = func.dfg().value(value).ty().clone();
-        let array = new_value!(func).alloc(ty);
+        let array = new_value(func).alloc(ty);
         add_value(func, bb, array);
-        let store = new_value!(func).store(value, array);
+        let store = new_value(func).store(value, array);
         add_value(func, bb, store);
         func.dfg_mut()
             .set_value_name(array, Some(format!("@{}_{}", &def.ident, symtab.get_id())));
@@ -384,14 +358,14 @@ fn build_lval(
         match current_type.kind() {
             TypeKind::Array(next_ty, _) => {
                 current_type = next_ty.clone();
-                pointer = new_value!(func).get_elem_ptr(pointer, index);
+                pointer = new_value(func).get_elem_ptr(pointer, index);
                 add_value(func, bb, pointer);
             }
             TypeKind::Pointer(next_ty) => {
                 current_type = next_ty.clone();
-                pointer = new_value!(func).load(pointer);
+                pointer = new_value(func).load(pointer);
                 add_value(func, bb, pointer);
-                pointer = new_value!(func).get_ptr(pointer, index);
+                pointer = new_value(func).get_ptr(pointer, index);
                 add_value(func, bb, pointer);
             }
             _ => unimplemented!(),
@@ -414,7 +388,7 @@ fn build_stmt(
         Stmt::Assign(lval, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
             let (pos, bb, _) = build_lval(func, bb, lval, symtab);
-            let store = new_value!(func).store(value, pos);
+            let store = new_value(func).store(value, pos);
             add_value(func, bb, store);
             bb
         }
@@ -422,10 +396,10 @@ fn build_stmt(
         Stmt::Return(exp) => {
             if let Some(exp) = exp {
                 let (ret_val, bb) = build_exp(func, bb, exp, symtab);
-                let ret = new_value!(func).ret(Some(ret_val));
+                let ret = new_value(func).ret(Some(ret_val));
                 add_value(func, bb, ret);
             } else {
-                let ret = new_value!(func).ret(None);
+                let ret = new_value(func).ret(None);
                 add_value(func, bb, ret);
             }
             let id = symtab.get_id();
@@ -456,12 +430,12 @@ fn build_stmt(
             build_logical_exp(func, bb, then_bb, else_bb, cond, symtab);
             add_bb(func, then_bb);
             let end_then = build_stmt(func, then_bb, true_branch, symtab);
-            let jmp = new_value!(func).jump(end_bb);
+            let jmp = new_value(func).jump(end_bb);
             add_value(func, end_then, jmp);
             if let Some(false_branch) = false_branch {
                 add_bb(func, else_bb);
                 let end_else = build_stmt(func, else_bb, false_branch, symtab);
-                let jmp = new_value!(func).jump(end_bb);
+                let jmp = new_value(func).jump(end_bb);
                 add_value(func, end_else, jmp);
             }
             add_bb(func, end_bb);
@@ -475,12 +449,12 @@ fn build_stmt(
             let body = new_bb(func, format!("%koopa_builtin_while_body_{id}"));
             symtab.enter_loop(entry, exit);
             add_bb(func, entry);
-            let enter = new_value!(func).jump(entry);
+            let enter = new_value(func).jump(entry);
             add_value(func, bb, enter);
             build_logical_exp(func, entry, body, exit, exp, symtab);
             add_bb(func, body);
             let end_body = build_stmt(func, body, stmt, symtab);
-            let enter = new_value!(func).jump(entry);
+            let enter = new_value(func).jump(entry);
             add_value(func, end_body, enter);
             add_bb(func, exit);
             symtab.quit_loop();
@@ -490,7 +464,7 @@ fn build_stmt(
         Stmt::Break => {
             let id = symtab.get_id();
             let target = symtab.loop_end();
-            let jump = new_value!(func).jump(target);
+            let jump = new_value(func).jump(target);
             add_value(func, bb, jump);
             let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
             end_bb
@@ -499,7 +473,7 @@ fn build_stmt(
         Stmt::Continue => {
             let id = symtab.get_id();
             let target = symtab.loop_entry();
-            let jump = new_value!(func).jump(target);
+            let jump = new_value(func).jump(target);
             add_value(func, bb, jump);
             let end_bb = new_bb(func, format!("%koopa_builtin_unused_{id}"));
             end_bb
@@ -515,19 +489,19 @@ fn build_exp(
 ) -> (Value, BasicBlock) {
     match exp {
         // Build a single number
-        Exp::Number(num) => (new_value!(func).integer(*num), bb),
+        Exp::Number(num) => (new_value(func).integer(*num), bb),
         // Build a left value
         Exp::LVal(lval) => match symtab.get_symbol(&lval.ident) {
-            Symbol::Const(val) => (new_value!(func).integer(val), bb),
+            Symbol::Const(val) => (new_value(func).integer(val), bb),
             _ => {
                 let (pos, bb, ty) = build_lval(func, bb, lval, symtab);
                 if matches!(ty.kind(), TypeKind::Array(_, _)) {
-                    let zero = new_value!(func).integer(0);
-                    let pos = new_value!(func).get_elem_ptr(pos, zero);
+                    let zero = new_value(func).integer(0);
+                    let pos = new_value(func).get_elem_ptr(pos, zero);
                     add_value(func, bb, pos);
                     (pos, bb)
                 } else {
-                    let load = new_value!(func).load(pos);
+                    let load = new_value(func).load(pos);
                     add_value(func, bb, load);
                     (load, bb)
                 }
@@ -537,19 +511,19 @@ fn build_exp(
         Exp::Unary(op, exp) => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
             if let Some(val) = get_integer(func, value) {
-                return (new_value!(func).integer(op.compute(val)), bb);
+                return (new_value(func).integer(op.compute(val)), bb);
             }
             match op {
                 UnaryOperator::Pos => (value, bb),
                 UnaryOperator::Neg => {
-                    let zero = new_value!(func).integer(0);
-                    let neg = new_value!(func).binary(BinaryOp::Sub, zero, value);
+                    let zero = new_value(func).integer(0);
+                    let neg = new_value(func).binary(BinaryOp::Sub, zero, value);
                     add_value(func, bb, neg);
                     (neg, bb)
                 }
                 UnaryOperator::Not => {
-                    let zero = new_value!(func).integer(0);
-                    let not = new_value!(func).binary(BinaryOp::Eq, value, zero);
+                    let zero = new_value(func).integer(0);
+                    let not = new_value(func).binary(BinaryOp::Eq, value, zero);
                     add_value(func, bb, not);
                     (not, bb)
                 }
@@ -564,32 +538,32 @@ fn build_exp(
                 bb = next_bb;
                 args.push(value);
             }
-            let result = new_value!(func).call(symtab.get_function(ident), args);
+            let result = new_value(func).call(symtab.get_function(ident), args);
             add_value(func, bb, result);
             (result, bb)
         }
         // Build a binary expression
         Exp::Binary(_, BinaryOperator::And | BinaryOperator::Or, _) => {
-            let one = new_value!(func).integer(1);
-            let zero = new_value!(func).integer(0);
+            let one = new_value(func).integer(1);
+            let zero = new_value(func).integer(0);
             let id = symtab.get_id();
             let true_bb = new_bb(func, format!("%koopa_builtin_true_{id}"));
             let false_bb = new_bb(func, format!("%koopa_builtin_false_{id}"));
             let exit_bb = new_bb(func, format!("%koopa_builtin_end_{id}"));
-            let result = new_value!(func).alloc(Type::get_i32());
+            let result = new_value(func).alloc(Type::get_i32());
             add_value(func, bb, result);
             build_logical_exp(func, bb, true_bb, false_bb, exp, symtab);
             add_bb(func, true_bb);
             add_bb(func, false_bb);
-            let assign = new_value!(func).store(one, result);
+            let assign = new_value(func).store(one, result);
             add_value(func, true_bb, assign);
-            let assign = new_value!(func).store(zero, result);
+            let assign = new_value(func).store(zero, result);
             add_value(func, false_bb, assign);
-            let jump = new_value!(func).jump(exit_bb);
+            let jump = new_value(func).jump(exit_bb);
             add_value(func, true_bb, jump);
             add_value(func, false_bb, jump);
             add_bb(func, exit_bb);
-            let result = new_value!(func).load(result);
+            let result = new_value(func).load(result);
             add_value(func, exit_bb, result);
             (result, exit_bb)
         }
@@ -600,12 +574,12 @@ fn build_exp(
             if let Some(left_value) = get_integer(func, left) {
                 if let Some(right_value) = get_integer(func, right) {
                     return (
-                        new_value!(func).integer(op.compute(left_value, right_value)),
+                        new_value(func).integer(op.compute(left_value, right_value)),
                         bb,
                     );
                 }
             }
-            let value = new_value!(func).binary(op.clone().into(), left, right);
+            let value = new_value(func).binary(op.clone().into(), left, right);
             add_value(func, bb, value);
             (value, bb)
         }
@@ -623,7 +597,7 @@ fn build_logical_exp(
     match exp {
         // Build a single number
         Exp::Number(num) => {
-            let jmp = new_value!(func).jump(if *num != 0 { true_bb } else { false_bb });
+            let jmp = new_value(func).jump(if *num != 0 { true_bb } else { false_bb });
             add_value(func, bb, jmp);
         }
         // Build unary expression
@@ -650,7 +624,7 @@ fn build_logical_exp(
         // Others, just evaluate and jump
         _ => {
             let (value, bb) = build_exp(func, bb, exp, symtab);
-            let branch = new_value!(func).branch(value, true_bb, false_bb);
+            let branch = new_value(func).branch(value, true_bb, false_bb);
             add_value(func, bb, branch);
         }
     }
@@ -660,11 +634,8 @@ fn build_logical_exp(
 
 /// Judge whether a block is marked with unused
 fn is_unused_block(func: &mut FunctionData, bb: BasicBlock) -> bool {
-    func.dfg()
-        .bb(bb)
-        .name()
-        .as_ref()
-        .expect("basic blocks should have a non-default name")
+    let name = func.dfg().bb(bb).name().as_ref();
+    name.expect("basic blocks should have a non-default name")
         .starts_with("%koopa_builtin_unused")
 }
 
@@ -677,6 +648,10 @@ fn add_value(func: &mut FunctionData, bb: BasicBlock, inst: Value) {
             .push_key_back(inst)
             .unwrap();
     }
+}
+
+fn new_value(func: &mut FunctionData) -> LocalBuilder {
+    func.dfg_mut().new_value()
 }
 
 /// Add a new basic block into a function.
@@ -805,7 +780,7 @@ fn build_init_value(
 
     let size = shape.iter().product();
     let mut data = Vec::new();
-    data.resize(size, new_value!(func).integer(0));
+    data.resize(size, new_value(func).integer(0));
     match val {
         InitVal::Single(exp) => {
             let (value, next_bb) = build_exp(func, bb, exp, symtab);
